@@ -1,151 +1,258 @@
-# LexiLens 🔍✨
+# ✨ LexiLens - Dyslexia Writing Assistant
 
-**A high-performance, dyslexia-focused reading and writing assistant browser extension.**
+**A Grammarly-style browser extension that highlights and fixes dyslexia-specific spelling mistakes as you type.**
 
-LexiLens helps users with dyslexia read and write more effectively across the web by providing visual aids and intelligent phonetic spelling corrections.
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Chrome%20%7C%20Firefox-orange)
+
+---
+
+## 🎯 What It Does
+
+LexiLens watches what you type and **underlines words** that match common dyslexia spelling patterns. Click an underlined word to see suggestions and fix it with one click.
+
+### Example
+```
+You type: "I want to go their with my frend"
+                          ─────        ─────
+LexiLens underlines:      "their"      "frend"
+                             ↓            ↓  
+Suggests:               "there"      "friend"
+```
+
+---
 
 ## ✨ Features
 
-### 📏 Reading Ruler
-A semi-transparent colored band that follows your mouse cursor vertically, helping you focus on one line of text at a time.
+### 🔍 Smart Detection
+- **100+ dyslexia-specific patterns** - Common mistakes like "frend" → "friend"
+- **Phonetic matching** - Understands words spelled how they sound
+- **Letter reversal detection** - Catches b/d, p/q confusions
+- **Homophone awareness** - Flags their/there/they're, your/you're
 
-- Customizable color, opacity, and height
-- Non-intrusive (never blocks page interactions)
-- Works on all websites
-- Toggle with `Alt+R`
+### 🎨 Non-Intrusive UI
+- **Subtle underlines** - Orange highlights under problem words
+- **Click to fix** - Beautiful popup with suggestions
+- **One-click corrections** - Select a suggestion to apply it instantly
 
-### 📝 Phonetic Spelling Assistance
-Intelligent spelling suggestions that understand how words *sound*, not just how they're spelled.
+### 🔒 Privacy First
+- **Local processing** - Dictionary runs entirely on your device
+- **No data collection** - Nothing leaves your browser
+- **Optional AI** - OpenAI integration available but not required
 
-- **Local Dictionary**: Instant corrections for 100+ common dyslexia-specific misspellings
-- **Homophone Awareness**: Helps distinguish between their/there/they're, your/you're, etc.
-- **AI-Powered** (Optional): Enhanced suggestions via OpenAI API
-- 1-second debounce to avoid interrupting your flow
-
-### 🎨 Dyslexia-Friendly Design
-- Warm, comfortable color palette
-- Non-destructive overlays (never modifies webpage content)
-- Accessible and screen-reader friendly
+---
 
 ## 🚀 Quick Start
 
-### Development
+### Install from Source
 
 ```bash
+# Clone the repo
+git clone https://github.com/yourusername/lexi-lens.git
+cd lexi-lens
+
 # Install dependencies
 npm install
 
-# Run in development mode (Chrome)
-npm run dev
-
-# Run in development mode (Firefox)
-npm run dev:firefox
-```
-
-### Production Build
-
-```bash
-# Build for Chrome
+# Build the extension
 npm run build
 
-# Build for Firefox
-npm run build:firefox
-
-# Create distributable ZIP
-npm run zip
+# The extension is ready in the 'dist' folder
 ```
 
-## 📦 Installation
+### Load in Chrome
 
-### From Source (Development)
-1. Run `npm run build`
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable "Developer mode"
-4. Click "Load unpacked"
-5. Select the `.output/chrome-mv3` folder
+1. Go to `chrome://extensions/`
+2. Enable **Developer mode** (toggle in top right)
+3. Click **Load unpacked**
+4. Select the `dist` folder from the project
 
-### From Store (Coming Soon)
-- Chrome Web Store
-- Firefox Add-ons
+### Load in Firefox
 
-## ⌨️ Keyboard Shortcuts
+1. Go to `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on**
+3. Select any file in the `dist` folder
 
-| Shortcut | Action |
-|----------|--------|
-| `Alt+R` | Toggle Reading Ruler |
-| `Alt+L` | Toggle LexiLens completely |
+---
 
-## ⚙️ Configuration
+## 📖 How to Use
 
-Click the LexiLens icon in your browser toolbar to access settings:
+1. **Click the LexiLens icon** in your browser toolbar to open settings
+2. **Make sure it's enabled** (toggle should be ON)
+3. **Start typing** in any text field on any website
+4. **Watch for orange underlines** - these are potential issues
+5. **Click an underline** to see suggestions
+6. **Click a suggestion** to apply the fix
 
-### Reading Ruler
-- **Enable/Disable**: Toggle the ruler on or off
-- **Color**: Choose your preferred highlight color
-- **Opacity**: Adjust transparency (10-80%)
-- **Height**: Set the ruler band height (20-100px)
+### Supported Text Fields
+- ✅ Regular text inputs
+- ✅ Textareas
+- ✅ Gmail composer
+- ✅ Google Docs (limited)
+- ✅ Facebook posts
+- ✅ Any `contenteditable` element
 
-### Spelling Help
-- **Enable/Disable**: Toggle spelling assistance
-- **AI Provider**: Choose between local dictionary only, OpenAI, or disabled
-- **API Key**: Required for OpenAI integration
+---
 
-## 🔒 Privacy
+## 📁 Project Structure
 
-- All local dictionary lookups happen entirely on your device
-- AI features are opt-in and require explicit configuration
-- No data is collected or stored beyond your settings
-- API keys are stored securely in browser storage
+```
+lexi-lens/
+├── entrypoints/
+│   ├── background.ts          # Service worker (AI logic)
+│   ├── content/
+│   │   ├── index.ts           # Main content script (highlighting)
+│   │   └── style.css          # Underline & popup styles
+│   └── popup/
+│       ├── App.tsx            # Settings UI (React)
+│       └── App.css            # Purple theme styles
+│
+├── utils/
+│   ├── debounce.ts            # Debounce utility (500ms)
+│   ├── phonetic-engine.ts     # Local dictionary & analysis
+│   ├── messages.ts            # Content ↔ Background bridge
+│   └── storage.ts             # Settings persistence
+│
+├── types/
+│   └── index.ts               # TypeScript interfaces
+│
+├── wxt.config.ts              # WXT configuration
+└── package.json
+```
+
+---
+
+## 🧠 The Phonetic Engine
+
+The local dictionary includes 100+ common dyslexia-specific misspellings:
+
+### Letter Reversals
+| Typed | Corrected |
+|-------|-----------|
+| doy | boy |
+| dag | bag |
+| qark | park |
+
+### Phonetic Spellings
+| Typed | Corrected |
+|-------|-----------|
+| frend | friend |
+| sed | said |
+| becuase | because |
+| wich | which |
+| definately | definitely |
+
+### Homophones
+The engine flags these for review (context-dependent):
+- their / there / they're
+- your / you're
+- its / it's
+- to / too / two
+
+---
+
+## ⚙️ Settings
+
+Click the LexiLens icon to access settings:
+
+| Setting | Description |
+|---------|-------------|
+| **Enable LexiLens** | Turn highlighting on/off |
+| **Correction Engine** | Choose Local Dictionary or AI-Powered |
+| **API Key** | Required for OpenAI mode |
+
+---
+
+## 🔧 Development
+
+### Available Commands
+
+```bash
+npm run dev          # Start dev server (Chrome)
+npm run dev:firefox  # Start dev server (Firefox)
+npm run build        # Production build (Chrome)
+npm run build:firefox # Production build (Firefox)
+npm run zip          # Create distributable ZIP
+```
+
+### Adding New Words to Dictionary
+
+Edit `utils/phonetic-engine.ts`:
+
+```typescript
+const DYSLEXIA_DICTIONARY = new Map([
+  // Add your patterns here
+  ['youre', "you're"],
+  ['wierd', 'weird'],
+]);
+```
+
+---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    LexiLens Extension                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  Content Script (content/index.ts)                          │
-│  ├── Reading Ruler (visual UI)                              │
-│  ├── Text Capture (input monitoring)                        │
-│  └── Suggestion Overlays                                    │
-│                                                              │
-│  Background Worker (background.ts)                          │
-│  ├── AI Integration (OpenAI)                                │
-│  ├── Heavy Processing                                       │
-│  └── Settings Management                                    │
-│                                                              │
-│  Popup (popup/)                                             │
-│  └── Settings UI                                            │
-│                                                              │
-│  Utilities (utils/)                                         │
-│  ├── phonetic-engine.ts (local dictionary)                  │
-│  ├── storage.ts (settings persistence)                      │
-│  ├── messages.ts (content <-> background bridge)            │
-│  └── debounce.ts (performance utility)                      │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    User Types Text                       │
+└─────────────────────┬───────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────┐
+│              Content Script (content.ts)                 │
+│  • Watches input/textarea/contenteditable elements      │
+│  • Debounces input (500ms)                              │
+│  • Calls phonetic-engine for analysis                   │
+│  • Renders underline highlights                         │
+│  • Shows suggestion popup on click                      │
+└─────────────────────┬───────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────┐
+│            Phonetic Engine (phonetic-engine.ts)          │
+│  • 100+ dyslexia patterns                               │
+│  • Phonetic similarity matching                         │
+│  • Returns: { word, suggestions, confidence, position } │
+└─────────────────────────────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────┐
+│           Background Script (optional AI)                │
+│  • Calls OpenAI API if configured                       │
+│  • Merges AI + local suggestions                        │
+└─────────────────────────────────────────────────────────┘
 ```
-
-## 🛠️ Technology Stack
-
-- **Framework**: [WXT](https://wxt.dev/) (Web Extension Toolbox)
-- **Language**: TypeScript
-- **UI**: React (popup only)
-- **State**: `wxt/storage` for settings persistence
-- **Supported Browsers**: Chrome (MV3), Firefox
-
-## 📚 Documentation
-
-See [docs/PLANNING.md](docs/PLANNING.md) for detailed architecture and implementation plans.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
 
 ---
 
-Built with ❤️ for the dyslexia community.
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes
+4. Run `npm run build` to verify
+5. Submit a Pull Request
+
+### Ideas for Contributions
+- Add more words to the dictionary
+- Improve detection for specific languages
+- Add "ignore word" feature
+- Add personal dictionary support
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- Built with [WXT](https://wxt.dev/) framework
+- Inspired by Grammarly's UX
+- Made for the dyslexia community
+
+---
+
+<p align="center">
+  <strong>Made with ❤️ for dyslexic writers everywhere</strong>
+</p>
+

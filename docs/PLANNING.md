@@ -1,108 +1,131 @@
-# LexiLens - Dyslexia-Focused Writing Assistant
+# LexiLens - Product Planning Document
 
-## 📋 Product Overview
+## 📋 Overview
 
-**LexiLens** is a high-performance browser extension designed to assist users with dyslexia in reading and writing across the web. Built with the WXT (Web Extension Toolbox) framework and TypeScript, it provides real-time visual aids and intelligent text correction without disrupting the user's browsing experience.
-
----
-
-## 🎯 Target Users
-
-- Individuals with dyslexia who struggle with reading long passages
-- Writers who need phonetic-aware spelling assistance
-- Anyone who benefits from visual reading aids
+**LexiLens** is a Grammarly-style browser extension designed specifically for people with dyslexia. It monitors text input across all websites and highlights potential spelling issues using a phonetic-aware correction engine.
 
 ---
 
-## 🏗️ Architecture Overview
+## 🎯 Problem Statement
+
+People with dyslexia often struggle with:
+- **Phonetic spelling** - Writing words as they sound ("frend" instead of "friend")
+- **Letter reversals** - Confusing b/d, p/q, m/w
+- **Homophones** - Mixing up their/there/they're, your/you're
+- **Double letters** - Missing or adding extra letters
+
+Traditional spell checkers don't understand these patterns because they use edit-distance algorithms instead of phonetic matching.
+
+---
+
+## 💡 Solution
+
+LexiLens provides:
+1. **Inline highlighting** - Underlines problem words as you type
+2. **Phonetic-first suggestions** - Prioritizes sound-alike corrections
+3. **One-click fixes** - Click underline → click suggestion → done
+4. **Optional AI enhancement** - OpenAI for context-aware corrections
+
+---
+
+## 🏗️ Architecture
+
+### High-Level Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Browser Extension                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────────┐    Messages    ┌──────────────────────┐   │
-│  │   content.ts     │◄──────────────►│   background.ts      │   │
-│  │   (DOM Layer)    │                │   (Service Worker)   │   │
-│  │                  │                │                      │   │
-│  │  • Reading Ruler │                │  • AI/LLM Logic      │   │
-│  │  • Text Capture  │                │  • Heavy Processing  │   │
-│  │  • UI Overlays   │                │  • Storage Sync      │   │
-│  └──────────────────┘                └──────────────────────┘   │
-│           │                                    │                 │
-│           │                                    │                 │
-│           ▼                                    ▼                 │
-│  ┌──────────────────┐                ┌──────────────────────┐   │
-│  │   styles.css     │                │ chrome.storage.local │   │
-│  │   (Visual Layer) │                │   (User Settings)    │   │
-│  └──────────────────┘                └──────────────────────┘   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+User Types → Content Script → Debounce (500ms) → Phonetic Engine → Highlights
+                                                         ↓
+                                              [Optional] Background Script
+                                                         ↓
+                                                   OpenAI API
+```
+
+### Components
+
+#### 1. Content Script (`entrypoints/content/index.ts`)
+**Responsibility:** DOM interaction, highlighting, user interaction
+
+- Listens for `focusin` events on editable elements
+- Captures text via `input` events
+- Debounces analysis (500ms delay)
+- Renders highlight overlays using absolute positioning
+- Shows suggestion popup on highlight click
+- Applies corrections to the text field
+
+#### 2. Phonetic Engine (`utils/phonetic-engine.ts`)
+**Responsibility:** Local, instant spelling analysis
+
+- Contains 100+ dyslexia-specific word mappings
+- Analyzes text word-by-word
+- Returns suggestions with confidence scores
+- Preserves original word casing in corrections
+
+#### 3. Background Script (`entrypoints/background.ts`)
+**Responsibility:** AI integration, settings management
+
+- Handles OpenAI API calls (when enabled)
+- Manages settings via `browser.storage.local`
+- Broadcasts settings changes to all tabs
+
+#### 4. Popup UI (`entrypoints/popup/App.tsx`)
+**Responsibility:** User settings interface
+
+- Toggle extension on/off
+- Choose correction engine (local vs AI)
+- Enter OpenAI API key
+- Shows "how it works" instructions
+
+---
+
+## 📊 Data Flow
+
+### Text Analysis Flow
+
+```
+1. User focuses on input field
+2. User types text
+3. Content script captures text
+4. Debounce waits 500ms for pause
+5. Phonetic engine analyzes text
+6. Engine returns: [{ original, suggestions, confidence, position }]
+7. Content script renders highlights at word positions
+8. User clicks highlight
+9. Popup shows suggestions
+10. User clicks suggestion
+11. Content script replaces word in field
+12. Re-analyze with new text
+```
+
+### Settings Flow
+
+```
+1. User opens popup
+2. User changes setting
+3. Popup calls updateSettings()
+4. Storage updated via browser.storage.local
+5. broadcastSettingsUpdate() sends to all tabs
+6. Content scripts receive SETTINGS_UPDATED message
+7. Content scripts apply new settings
 ```
 
 ---
 
-## 🧩 Core Features
+## 🎨 UI Design
 
-### A. Reading Ruler (Visual UI)
+### Highlight Style
+- **Color:** Orange gradient (`#FF6B35` to `#FF8C42`)
+- **Position:** 3px underline below word
+- **Interaction:** Pointer cursor, scales on hover
 
-**Purpose:** Provides a semi-transparent colored band that follows the mouse cursor, helping users focus on one line of text at a time.
+### Suggestion Popup
+- **Theme:** Purple gradient (matches popup)
+- **Layout:** Header → Original word → Suggestions → Dismiss
+- **Primary suggestion:** Green background, top of list
 
-**Implementation:**
-- Inject a non-destructive `<div>` into the DOM via `content.ts`
-- Follow mouse cursor vertically across the viewport
-- Use CSS `pointer-events: none` to prevent interaction blocking
-- Apply `mix-blend-mode: multiply` for better readability
-- Toggle ON/OFF via popup or keyboard shortcut
-
-**User Experience:**
-- Activates on page load (if enabled in settings)
-- Smooth vertical tracking with mouse movement
-- Configurable height, color, and opacity
-
-### B. Universal Text Capture (The "Eyes")
-
-**Purpose:** Monitor user input across all web forms and rich text editors.
-
-**Implementation:**
-- Listen for `input` events on `<input>` and `<textarea>` elements
-- Use `MutationObserver` for `contenteditable` elements (Gmail, Facebook, etc.)
-- Only observe the **actively focused** element for performance
-- 1000ms debounce to trigger analysis only when user pauses typing
-
-**Supported Platforms:**
-- Standard HTML forms
-- Gmail composer
-- Facebook posts
-- Google Docs (limited)
-- Any contenteditable div
-
-### C. Phonetic Correction Engine (The "Brain")
-
-**Purpose:** Provide intelligent spelling suggestions based on phonetic similarity, not just edit distance.
-
-**Implementation:**
-1. **Local Dictionary (Instant):**
-   - Common dyslexia-specific swaps (e.g., "frend" → "friend")
-   - Phonetically confused pairs (e.g., "their/there/they're")
-   - Letter reversal patterns (b/d, p/q)
-
-2. **AI-Powered (Async):**
-   - Send text to background service worker
-   - Background worker calls LLM API (OpenAI or local)
-   - System prompt prioritizes phonetic similarity
-   - Returns suggestions to content script
-
-### D. Non-Destructive UI Highlights
-
-**Purpose:** Visually indicate problematic words without modifying the page's HTML.
-
-**Implementation:**
-- Calculate word positions using `getBoundingClientRect()`
-- Create absolute-positioned overlay divs
-- Apply "dyslexia-friendly" orange squiggles
-- Updates position on scroll/resize
-- Clean up on focus change
+### Popup Theme
+- **Background:** Purple gradient (`#667eea` to `#764ba2`)
+- **Cards:** White with 10% opacity
+- **Toggles:** Green when active
 
 ---
 
@@ -110,183 +133,128 @@
 
 ```
 lexi-lens/
-├── docs/
-│   └── PLANNING.md              # This document
 ├── entrypoints/
-│   ├── background.ts            # Service worker (AI logic, storage)
-│   ├── content.ts               # Main content script
+│   ├── background.ts           # Service worker
 │   ├── content/
-│   │   ├── index.ts             # Content script entry
-│   │   └── style.css            # Injected styles
+│   │   ├── index.ts            # Main content script
+│   │   └── style.css           # Highlight & popup styles
 │   └── popup/
-│       ├── App.tsx              # Settings UI
-│       ├── App.css              # Popup styles
-│       ├── index.html           # Popup HTML
-│       └── main.tsx             # React entry
+│       ├── App.tsx             # Settings UI
+│       ├── App.css             # Popup styles
+│       ├── index.html          # HTML template
+│       ├── main.tsx            # React entry
+│       └── style.css           # Base styles
+│
 ├── utils/
-│   ├── debounce.ts              # Debounce utility
-│   ├── phonetic-engine.ts       # Local phonetic dictionary
-│   ├── messages.ts              # Type-safe messaging
-│   └── storage.ts               # Settings management
+│   ├── debounce.ts             # Debounce utility
+│   ├── messages.ts             # Message bridge types
+│   ├── phonetic-engine.ts      # Local dictionary
+│   └── storage.ts              # Settings persistence
+│
 ├── types/
-│   └── index.ts                 # TypeScript interfaces
-├── assets/
-│   └── ...                      # Icons and images
+│   └── index.ts                # TypeScript definitions
+│
 ├── public/
-│   └── icon/                    # Extension icons
-├── wxt.config.ts                # WXT configuration
-├── package.json
-└── tsconfig.json
+│   └── icon/                   # Extension icons
+│
+├── docs/
+│   └── PLANNING.md             # This document
+│
+├── wxt.config.ts               # WXT configuration
+├── tsconfig.json               # TypeScript config
+└── package.json                # Dependencies
 ```
 
 ---
 
-## 🔧 Technical Specifications
+## 🔒 Security & Privacy
 
-### TypeScript Interfaces
+### Data Handling
+- **Local processing:** Default mode uses local dictionary only
+- **No telemetry:** Extension doesn't collect any data
+- **Optional AI:** User must explicitly enable and provide API key
 
-```typescript
-// User Settings
-interface LexiLensSettings {
-  rulerEnabled: boolean;
-  rulerColor: string;
-  rulerOpacity: number;
-  rulerHeight: number;
-  correctionEnabled: boolean;
-  aiProvider: 'openai' | 'local' | 'none';
-  apiKey?: string;
-}
+### Permissions
+- `storage` - Save user settings
+- `activeTab` - Access current tab for content script
 
-// Correction Suggestion
-interface SpellingSuggestion {
-  original: string;
-  suggestions: string[];
-  confidence: number;
-  source: 'local' | 'ai';
-  position: { start: number; end: number };
-}
-
-// Message Types
-type MessageType = 
-  | { type: 'ANALYZE_TEXT'; payload: string }
-  | { type: 'ANALYSIS_RESULT'; payload: SpellingSuggestion[] }
-  | { type: 'SETTINGS_UPDATED'; payload: Partial<LexiLensSettings> };
-```
-
-### Performance Constraints
-
-| Constraint | Implementation |
-|------------|----------------|
-| No main thread blocking | Heavy analysis in service worker |
-| Focused element only | Single MutationObserver instance |
-| Debounced triggers | 1000ms delay after typing stops |
-| Lazy initialization | Ruler created on first mouse move |
-| Cleanup on navigation | Remove observers and overlays |
-
-### Privacy Considerations
-
-- All local dictionary lookups happen client-side
-- AI calls are opt-in and configurable
-- No data stored beyond user settings
-- API keys stored in `chrome.storage.local` (encrypted by browser)
+### API Key Storage
+- Stored in `browser.storage.local`
+- Encrypted by browser
+- Never transmitted except to OpenAI API
 
 ---
 
-## 🚀 Deployment & Usage
+## 🚀 Deployment
 
-### Installation (Development)
-
+### Development
 ```bash
-# Clone and install
-cd lexi-lens
 npm install
-
-# Run in development mode (Chrome)
-npm run dev
-
-# Run in development mode (Firefox)
+npm run dev      # Chrome
 npm run dev:firefox
 ```
 
-### Installation (Production)
-
+### Production
 ```bash
-# Build for Chrome
-npm run build
-
-# Build for Firefox
-npm run build:firefox
-
-# Create distributable ZIP
-npm run zip
+npm run build    # Creates .output/chrome-mv3/
+npm run zip      # Creates distributable ZIP
 ```
 
-### User Guide
-
-1. **Install the extension** from Chrome Web Store or Firefox Add-ons
-2. **Pin the extension** to the toolbar for easy access
-3. **Click the icon** to open settings popup
-4. **Enable Reading Ruler** - a colored band follows your mouse
-5. **Enable Corrections** - type in any text field to see suggestions
-6. **Configure AI** (optional) - add API key for enhanced suggestions
-
-### Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Alt+R` | Toggle Reading Ruler |
-| `Alt+L` | Toggle LexiLens completely |
+### Distribution
+1. Chrome Web Store - Upload ZIP from `npm run zip`
+2. Firefox Add-ons - Upload ZIP from `npm run zip:firefox`
 
 ---
 
-## 📅 Implementation Phases
+## 📈 Future Enhancements
 
-### Phase 1: Foundation ✅ (Current)
-- [x] Project setup with WXT
-- [x] Basic debounce utility
-- [x] Phonetic engine skeleton
+### Phase 2
+- [ ] Personal dictionary (add words to ignore)
+- [ ] "Ignore this word" option
+- [ ] Statistics (words corrected, common mistakes)
 
-### Phase 2: Reading Ruler 🔄
-- [ ] Ruler DOM injection
-- [ ] Mouse tracking
-- [ ] CSS styling
-- [ ] Settings persistence
+### Phase 3
+- [ ] Multi-language support
+- [ ] Custom word lists
+- [ ] Sync settings across devices
 
-### Phase 3: Text Capture
-- [ ] Input/textarea monitoring
-- [ ] ContentEditable support
-- [ ] Focus-aware observation
-- [ ] Debounced triggers
-
-### Phase 4: Correction Engine
-- [ ] Local dictionary
-- [ ] Overlay highlights
-- [ ] Message bridge
-- [ ] AI integration (optional)
-
-### Phase 5: Polish
-- [ ] Popup settings UI
-- [ ] Keyboard shortcuts
-- [ ] Performance optimization
-- [ ] Cross-browser testing
+### Phase 4
+- [ ] Local LLM support (Ollama)
+- [ ] Voice input integration
+- [ ] Mobile app companion
 
 ---
 
-## 🔗 Dependencies
+## 🧪 Testing
 
-| Package | Purpose |
-|---------|---------|
-| `wxt` | Extension framework |
-| `react` | Popup UI |
-| `typescript` | Type safety |
+### Manual Testing Checklist
+- [ ] Install extension in Chrome
+- [ ] Open any website with text input
+- [ ] Type a misspelled word (e.g., "frend")
+- [ ] Verify underline appears
+- [ ] Click underline
+- [ ] Verify popup shows
+- [ ] Click suggestion
+- [ ] Verify word is replaced
+
+### Test Words
+```
+frend → friend
+becuase → because
+wich → which
+definately → definitely
+thier → their
+teh → the
+```
 
 ---
 
-## 📝 Notes for Developers
+## 📞 Support
 
-- Always use strict TypeScript interfaces for message passing
-- Test on Gmail, Facebook, and Google Docs specifically
-- The Reading Ruler must never block page interactions
-- Performance is critical - profile regularly
-- Support both Chrome and Firefox from the start
+- GitHub Issues: Bug reports and feature requests
+- Email: support@lexilens.app
+
+---
+
+*Last updated: February 2025*
 

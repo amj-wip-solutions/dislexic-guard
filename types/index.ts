@@ -7,30 +7,36 @@
 // User Settings
 // =============================================================================
 
-export interface LexiLensSettings {
-  /** Whether the reading ruler is enabled */
-  rulerEnabled: boolean;
-  /** Ruler band color (CSS color value) */
-  rulerColor: string;
-  /** Ruler opacity (0-1) */
-  rulerOpacity: number;
-  /** Ruler height in pixels */
-  rulerHeight: number;
-  /** Whether text correction is enabled */
-  correctionEnabled: boolean;
-  /** AI provider for advanced corrections */
-  aiProvider: 'openai' | 'local' | 'none';
-  /** API key for AI provider (stored securely) */
-  apiKey?: string;
+export type BrowserModelId = 'phi-3-mini' | 'tinyllama' | 'smollm';
+
+export interface BrowserAIConfig {
+  /** Whether browser AI is enabled */
+  enabled: boolean;
+  /** Which model to use */
+  modelId: BrowserModelId;
+  /** Custom work-specific terms that should not be flagged */
+  customTerms: string[];
 }
 
+export interface LexiLensSettings {
+  /** Whether text correction/highlighting is enabled */
+  correctionEnabled: boolean;
+  /** Highlight color for errors */
+  highlightColor: string;
+  /** Browser AI configuration */
+  browserAI: BrowserAIConfig;
+}
+
+export const DEFAULT_BROWSER_AI_CONFIG: BrowserAIConfig = {
+  enabled: false,
+  modelId: 'smollm', // Smallest model for fastest loading
+  customTerms: [],
+};
+
 export const DEFAULT_SETTINGS: LexiLensSettings = {
-  rulerEnabled: true,
-  rulerColor: '#FFE4B5', // Moccasin - dyslexia-friendly warm color
-  rulerOpacity: 0.4,
-  rulerHeight: 40,
   correctionEnabled: true,
-  aiProvider: 'local',
+  highlightColor: '#FF6B35',
+  browserAI: DEFAULT_BROWSER_AI_CONFIG,
 };
 
 // =============================================================================
@@ -93,51 +99,10 @@ export interface SettingsResponseMessage {
   payload: LexiLensSettings;
 }
 
-export interface ToggleRulerMessage {
-  type: 'TOGGLE_RULER';
-  payload?: boolean;
-}
-
 export type LexiLensMessage =
   | AnalyzeTextMessage
   | AnalysisResultMessage
   | SettingsUpdatedMessage
   | GetSettingsMessage
-  | SettingsResponseMessage
-  | ToggleRulerMessage;
-
-// =============================================================================
-// DOM & UI Types
-// =============================================================================
-
-export interface WordPosition {
-  /** The word text */
-  word: string;
-  /** Bounding rectangle relative to viewport */
-  rect: DOMRect;
-  /** Index in original text */
-  index: number;
-}
-
-export interface OverlayHighlight {
-  /** Unique identifier for this highlight */
-  id: string;
-  /** The DOM element used for the overlay */
-  element: HTMLElement;
-  /** Associated spelling suggestion */
-  suggestion: SpellingSuggestion;
-}
-
-// =============================================================================
-// Event Types
-// =============================================================================
-
-export interface TextChangeEvent {
-  /** The element that changed */
-  element: HTMLElement;
-  /** Current text content */
-  text: string;
-  /** Type of element */
-  elementType: 'input' | 'textarea' | 'contenteditable';
-}
+  | SettingsResponseMessage;
 

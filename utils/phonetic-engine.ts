@@ -226,17 +226,27 @@ interface WordMatch {
 
 /**
  * Extract words with their positions from text
+ * Improved to handle contractions, punctuation, and edge cases
  */
 function extractWords(text: string): WordMatch[] {
   const words: WordMatch[] = [];
-  const regex = /\b[a-zA-Z']+\b/g;
+
+  // Match words including contractions (don't, I'm, etc.)
+  // But exclude numbers and ensure we get proper word boundaries
+  const regex = /[a-zA-Z]+(?:'[a-zA-Z]+)?/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
+    const word = match[0];
+    // Skip very short words (1-2 chars) unless they're in our dictionary
+    if (word.length < 3 && !DYSLEXIA_DICTIONARY.has(word.toLowerCase())) {
+      continue;
+    }
+
     words.push({
-      word: match[0],
+      word: word,
       start: match.index,
-      end: match.index + match[0].length,
+      end: match.index + word.length,
     });
   }
 

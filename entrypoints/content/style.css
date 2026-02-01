@@ -1,251 +1,287 @@
 /**
  * LexiLens Content Script Styles
- * Styles for the Reading Ruler and UI overlays
+ * Grammarly-style inline highlighting for dyslexia issues
+ *
+ * KEY DIFFERENTIATOR: Encouraging, educational, dyslexia-friendly design
  */
 
 /* =============================================================================
-   CSS Variables (Customizable via JavaScript)
+   Highlight Container
    ============================================================================= */
 
-:root {
-  --lexilens-ruler-color: #FFE4B5;
-  --lexilens-ruler-opacity: 0.4;
-  --lexilens-ruler-height: 40px;
-  --lexilens-highlight-color: #FF8C00;
-  --lexilens-toast-bg: #2D2D2D;
-  --lexilens-toast-text: #FFFFFF;
-}
-
-/* =============================================================================
-   Reading Ruler
-   ============================================================================= */
-
-#lexilens-reading-ruler {
-  /* Positioning */
-  position: fixed;
+#lexilens-highlight-container {
+  position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  z-index: 2147483646; /* Just below max to avoid conflicts */
-
-  /* Dimensions */
-  height: var(--ruler-height, var(--lexilens-ruler-height));
-  width: 100vw;
-
-  /* Appearance */
-  background-color: var(--ruler-color, var(--lexilens-ruler-color));
-  opacity: 0;
-
-  /* Blend mode for better readability over text */
-  mix-blend-mode: multiply;
-
-  /* Prevent interaction - ruler should never block clicks */
   pointer-events: none;
-
-  /* Performance optimizations */
-  will-change: transform, opacity;
-  contain: layout style;
-
-  /* Smooth transitions */
-  transition: opacity 0.15s ease-out;
-}
-
-#lexilens-reading-ruler.visible {
-  opacity: var(--ruler-opacity, var(--lexilens-ruler-opacity));
-}
-
-/* Dark mode adjustment */
-@media (prefers-color-scheme: dark) {
-  #lexilens-reading-ruler {
-    mix-blend-mode: screen;
-  }
+  z-index: 2147483640;
 }
 
 /* =============================================================================
-   Overlay Container
-   ============================================================================= */
-
-#lexilens-overlay-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 2147483645;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-/* =============================================================================
-   Word Highlight (Squiggle Underline)
+   Word Highlights - Full word coverage for easy hovering!
    ============================================================================= */
 
 .lexilens-highlight {
   position: absolute;
-  pointer-events: none;
-
-  /* Orange squiggle underline */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='3' viewBox='0 0 4 3'%3E%3Cpath fill='none' stroke='%23FF8C00' stroke-width='1' d='M0 2 Q1 0 2 2 Q3 4 4 2'/%3E%3C/svg%3E");
-  background-repeat: repeat-x;
-  background-position: bottom;
-  background-size: 4px 3px;
-
-  /* Extend slightly below the word */
-  padding-bottom: 3px;
-  margin-bottom: -3px;
+  border-radius: 3px;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  /* Subtle background + bottom border = easy to see but not distracting */
+  border-bottom: 2px solid transparent;
+  background: transparent;
 }
 
-.lexilens-highlight::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
+/* High confidence - definite error (friendly orange) */
+.lexilens-highlight.high-confidence {
+  background: rgba(255, 149, 0, 0.15);
+  border-bottom-color: #FF9500;
+}
+
+.lexilens-highlight.high-confidence:hover {
+  background: rgba(255, 149, 0, 0.25);
+  box-shadow: 0 2px 8px rgba(255, 149, 0, 0.3);
+}
+
+/* Medium confidence - possible issue (soft yellow) */
+.lexilens-highlight.medium-confidence {
+  background: rgba(255, 214, 10, 0.15);
+  border-bottom-color: #FFD60A;
+}
+
+.lexilens-highlight.medium-confidence:hover {
+  background: rgba(255, 214, 10, 0.25);
+  box-shadow: 0 2px 8px rgba(255, 214, 10, 0.3);
 }
 
 /* =============================================================================
-   Suggestion Toast
+   Suggestion Popup - The Heart of Our UX
    ============================================================================= */
 
-.lexilens-toast {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
+#lexilens-suggestion-popup {
+  position: absolute;
   z-index: 2147483647;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 16px;
+  box-shadow:
+    0 10px 40px rgba(102, 126, 234, 0.4),
+    0 2px 10px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  padding: 0;
+  min-width: 280px;
+  max-width: 340px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: white;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px) scale(0.98);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
+}
 
-  /* Appearance */
-  background: var(--lexilens-toast-bg);
-  color: var(--lexilens-toast-text);
-  padding: 12px 16px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+#lexilens-suggestion-popup.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
 
-  /* Layout */
+/* Popup Header */
+.lexilens-popup-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: 350px;
-
-  /* Typography */
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 14px;
-  line-height: 1.4;
-
-  /* Animation */
-  opacity: 0;
-  transform: translateY(20px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
-
-  /* Allow interaction */
-  pointer-events: auto;
+  padding: 14px 18px 10px;
 }
 
-.lexilens-toast.visible {
-  opacity: 1;
-  transform: translateY(0);
+.lexilens-popup-icon {
+  font-size: 22px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
 }
 
-.lexilens-toast-icon {
-  font-size: 18px;
-  flex-shrink: 0;
+.lexilens-popup-title {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
 }
 
-.lexilens-toast-text {
-  flex: 1;
+/* Explanation - Educational content that makes us unique! */
+.lexilens-popup-explanation {
+  padding: 0 18px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.92;
+  color: rgba(255, 255, 255, 0.95);
 }
 
-.lexilens-toast-text strong {
-  color: #4CAF50;
+.lexilens-popup-explanation strong {
+  color: #FFD60A;
   font-weight: 600;
 }
 
-.lexilens-toast-text em {
-  color: #FF8C00;
-  font-style: normal;
-  text-decoration: line-through;
+.lexilens-popup-explanation em {
+  font-style: italic;
+  color: #A5D6FF;
 }
 
-/* Toast stack - when multiple toasts appear */
-.lexilens-toast:nth-last-of-type(2) {
-  bottom: 85px;
-}
-
-.lexilens-toast:nth-last-of-type(3) {
-  bottom: 150px;
-}
-
-/* =============================================================================
-   Suggestion Tooltip (Inline)
-   ============================================================================= */
-
-.lexilens-tooltip {
-  position: absolute;
-  z-index: 2147483647;
-
-  /* Appearance */
-  background: white;
-  border: 1px solid #E0E0E0;
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  padding: 8px;
-
-  /* Typography */
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+/* Original Word Display */
+.lexilens-popup-original {
+  padding: 10px 18px;
+  background: rgba(0, 0, 0, 0.15);
   font-size: 13px;
-
-  /* Animation */
-  opacity: 0;
-  transform: translateY(-5px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
-
-  /* Allow interaction */
-  pointer-events: auto;
+  color: rgba(255, 255, 255, 0.8);
 }
 
-.lexilens-tooltip.visible {
-  opacity: 1;
-  transform: translateY(0);
+.lexilens-popup-original .original-word {
+  color: #FF9AA2;
+  font-weight: 600;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 154, 162, 0.5);
 }
 
-.lexilens-tooltip-suggestion {
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
+/* Suggestions */
+.lexilens-popup-suggestions {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.lexilens-tooltip-suggestion:hover {
-  background-color: #F5F5F5;
-}
-
-.lexilens-tooltip-suggestion.primary {
-  background-color: #E8F5E9;
-  color: #2E7D32;
+.lexilens-suggestion-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  font-size: 15px;
   font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lexilens-suggestion-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateX(4px);
+}
+
+.lexilens-suggestion-btn.primary {
+  background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+}
+
+.lexilens-suggestion-btn.primary:hover {
+  background: linear-gradient(135deg, #4ADE80 0%, #22C55E 100%);
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.5);
+}
+
+.suggestion-word {
+  font-size: 15px;
+}
+
+.suggestion-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 3px 8px;
+  border-radius: 4px;
+  opacity: 0.9;
+}
+
+/* Footer Buttons */
+.lexilens-popup-footer {
+  padding: 10px 14px;
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.lexilens-dismiss-btn,
+.lexilens-learn-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lexilens-dismiss-btn:hover,
+.lexilens-learn-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.lexilens-learn-btn {
+  color: #A5D6FF;
+}
+
+.lexilens-learn-btn:hover {
+  background: rgba(165, 214, 255, 0.15);
+  color: #A5D6FF;
+}
+
+/* Reassurance Message - The Emotional Differentiator */
+.lexilens-popup-reassurance {
+  padding: 12px 18px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 0 0 16px 16px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  text-align: center;
+  font-style: italic;
 }
 
 /* =============================================================================
    Accessibility
    ============================================================================= */
 
-/* Reduce motion for users who prefer it */
 @media (prefers-reduced-motion: reduce) {
-  #lexilens-reading-ruler,
-  .lexilens-toast,
-  .lexilens-tooltip {
+  .lexilens-highlight,
+  #lexilens-suggestion-popup,
+  .lexilens-suggestion-btn {
     transition: none;
   }
 }
 
-/* High contrast mode adjustments */
+/* High contrast mode */
 @media (prefers-contrast: high) {
-  .lexilens-toast {
-    border: 2px solid white;
+  .lexilens-highlight.high-confidence {
+    background: #FF6600;
   }
 
-  .lexilens-highlight {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='3' viewBox='0 0 4 3'%3E%3Cpath fill='none' stroke='%23FF0000' stroke-width='1.5' d='M0 2 Q1 0 2 2 Q3 4 4 2'/%3E%3C/svg%3E");
+  .lexilens-highlight.medium-confidence {
+    background: #FFCC00;
+  }
+
+  #lexilens-suggestion-popup {
+    border: 2px solid white;
+  }
+}
+
+/* =============================================================================
+   Dark Mode Adjustments
+   ============================================================================= */
+
+@media (prefers-color-scheme: dark) {
+  #lexilens-suggestion-popup {
+    box-shadow:
+      0 10px 40px rgba(0, 0, 0, 0.5),
+      0 2px 10px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
 }
 
