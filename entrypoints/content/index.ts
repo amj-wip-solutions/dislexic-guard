@@ -1,17 +1,17 @@
 /**
- * LexiLens Content Script
- * Grammarly-style inline highlighting for dyslexia-specific spelling issues
+ * LexiLens Content Script - Status Bar Approach
+ * Shows issue count in a status bar, opens modal for sentence-by-sentence review
  */
 
 import { debounceWithCancel } from '../../utils/debounce';
-import { analyzeText } from '../../utils/phonetic-engine';
+import { analyzeText as analyzeTextLocal } from '../../utils/phonetic-engine';
 import { loadSettings, onSettingsChange } from '../../utils/storage';
 import { onContentMessage } from '../../utils/messages';
 import type { LexiLensSettings, SpellingSuggestion, LexiLensMessage } from '../../types';
 import './style.css';
+import './status-bar.css';
 
-// Browser AI module - lazily loaded
-let browserAIModule: typeof import('../../utils/browser-ai') | null = null;
+let aiEngineModule: typeof import('../../utils/ai-engine') | null = null;
 
 // =============================================================================
 // State
@@ -19,176 +19,240 @@ let browserAIModule: typeof import('../../utils/browser-ai') | null = null;
 
 let settings: LexiLensSettings | null = null;
 let currentFocusedElement: HTMLElement | null = null;
-let highlightContainer: HTMLDivElement | null = null;
-let suggestionPopup: HTMLDivElement | null = null;
+let statusBar: HTMLDivElement | null = null;
+let reviewModal: HTMLDivElement | null = null;
 let currentSuggestions: SpellingSuggestion[] = [];
-let activeHighlights: Map<string, HTMLDivElement> = new Map();
-let isPopupHovered = false;
-let isHighlightHovered = false;
-let hideTimeout: ReturnType<typeof setTimeout> | null = null;
-let browserAIReady = false;
-let aiLoadingPromise: Promise<boolean> | null = null;
+let currentSentences: Array<{ text: string; issues: SpellingSuggestion[] }> = [];
+let currentSentenceIndex = 0;
+let aiReady = false;
+let analysisVersion = 0;
+let lastAnalyzedText = '';
+
+// Track pending changes to apply all at once
+let pendingChanges: Array<{ original: string; replacement: string }> = [];
+let acceptedCount = 0;
+let ignoredCount = 0;
+let targetElement: HTMLElement | null = null; // Store element reference for applying changes later
 
 // =============================================================================
-// Content Script Definition
+// Initialization
 // =============================================================================
 
 export default defineContentScript({
   matches: ['<all_urls>'],
 
   async main() {
-    console.log('[LexiLens] Content script initialized');
+    console.log('[LexiLens] Content script initialized - Status Bar Mode');
 
-    // Load initial settings
     settings = await loadSettings();
 
-    // Initialize the highlight system
     if (settings.correctionEnabled) {
-      initializeHighlightSystem();
+      initializeStatusBarSystem();
     }
 
-    // Initialize browser AI if enabled
-    if (settings.browserAI?.enabled) {
-      initBrowserAI();
+    if (settings.dyslexicFontEnabled) {
+      enableDyslexicFont();
     }
 
-    // Listen for settings changes
+    initAIEngine();
+
     onSettingsChange((newSettings) => {
       const prevSettings = settings;
       settings = newSettings;
 
       if (newSettings.correctionEnabled !== prevSettings?.correctionEnabled) {
-        if (newSettings.correctionEnabled) {
-          initializeHighlightSystem();
-        } else {
-          destroyHighlightSystem();
-        }
+        newSettings.correctionEnabled ? initializeStatusBarSystem() : destroyStatusBarSystem();
       }
 
-      // Handle browser AI toggle
-      if (newSettings.browserAI?.enabled !== prevSettings?.browserAI?.enabled) {
-        if (newSettings.browserAI?.enabled) {
-          initBrowserAI();
-        }
+      if (newSettings.dyslexicFontEnabled !== prevSettings?.dyslexicFontEnabled) {
+        newSettings.dyslexicFontEnabled ? enableDyslexicFont() : disableDyslexicFont();
+      }
+
+      if (JSON.stringify(newSettings.ai) !== JSON.stringify(prevSettings?.ai)) {
+        initAIEngine();
       }
     });
 
-    // Listen for messages from background
     onContentMessage(handleBackgroundMessage);
   },
 });
 
-/**
- * Initialize browser AI model (lazy loading)
- */
-async function initBrowserAI(): Promise<void> {
-  if (browserAIReady || aiLoadingPromise) return;
+// =============================================================================
+// Dyslexic Font
+// =============================================================================
 
-  // Lazy load the browser AI module
-  if (!browserAIModule) {
+function injectFontFaces(): void {
+  if (document.getElementById('lexilens-font-faces')) return;
+
+  const style = document.createElement('style');
+  style.id = 'lexilens-font-faces';
+  const regularFontUrl = browser.runtime.getURL('fonts/OpenDyslexic-Regular.otf');
+  const boldFontUrl = browser.runtime.getURL('fonts/OpenDyslexic-Bold.otf');
+
+  style.textContent = `
+    @font-face {
+      font-family: 'OpenDyslexic';
+      src: url('${regularFontUrl}') format('opentype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'OpenDyslexic';
+      src: url('${boldFontUrl}') format('opentype');
+      font-weight: bold;
+      font-style: normal;
+      font-display: swap;
+    }
+  `;
+
+  document.head.appendChild(style);
+  console.log('[LexiLens] Font faces injected');
+}
+
+function enableDyslexicFont(): void {
+  injectFontFaces();
+  document.documentElement.classList.add('lexilens-dyslexic-font');
+  console.log('[LexiLens] Dyslexic font enabled');
+}
+
+function disableDyslexicFont(): void {
+  document.documentElement.classList.remove('lexilens-dyslexic-font');
+  console.log('[LexiLens] Dyslexic font disabled');
+}
+
+// =============================================================================
+// AI Engine
+// =============================================================================
+
+async function initAIEngine(): Promise<void> {
+  if (!settings) {
+    console.log('[LexiLens AI Init] ❌ No settings available');
+    return;
+  }
+
+  console.log('[LexiLens AI Init] ========== AI INITIALIZATION ==========');
+  console.log('[LexiLens AI Init] Backend:', settings.ai.backend);
+
+  if (!aiEngineModule) {
     try {
-      browserAIModule = await import('../../utils/browser-ai');
+      aiEngineModule = await import('../../utils/ai-engine');
+      console.log('[LexiLens AI Init] ✅ AI engine module loaded');
     } catch (e) {
-      console.error('[LexiLens] Failed to load AI module:', e);
+      console.error('[LexiLens AI Init] ❌ Failed to load AI engine:', e);
       return;
     }
   }
 
-  const hasWebGPU = await browserAIModule.checkWebGPUSupport();
-  if (!hasWebGPU) {
-    console.log('[LexiLens] WebGPU not supported, AI disabled');
-    return;
-  }
-
-  console.log('[LexiLens] Loading browser AI model...');
-  aiLoadingPromise = browserAIModule.initializeBrowserAI(
-    settings?.browserAI?.modelId || 'smollm',
-    (progress) => {
-      console.log(`[LexiLens] AI loading: ${Math.round(progress * 100)}%`);
+  if (settings.ai.backend === 'browser') {
+    if (!settings.ai.modelDownloaded) {
+      console.log('[LexiLens AI Init] ⚠️  Model not downloaded');
+      aiReady = false;
+      return;
     }
-  );
 
-  browserAIReady = await aiLoadingPromise;
-  aiLoadingPromise = null;
+    const hasWebGPU = await aiEngineModule.checkWebGPUSupport();
+    if (!hasWebGPU) {
+      console.log('[LexiLens AI Init] ❌ WebGPU not supported');
+      aiReady = false;
+      return;
+    }
 
-  if (browserAIReady) {
-    console.log('[LexiLens] Browser AI ready!');
+    const success = await aiEngineModule.initBrowserAI(settings.ai.browserModelId);
+    aiReady = success;
+    console.log('[LexiLens AI Init]', success ? '✅ READY' : '❌ FAILED');
+  } else {
+    const available = await aiEngineModule.checkOllamaAvailable(settings.ai.ollamaEndpoint);
+    aiReady = available;
+    console.log('[LexiLens AI Init] Ollama:', available ? '✅ AVAILABLE' : '❌ UNAVAILABLE');
   }
+
+  console.log('[LexiLens AI Init] Final Status:', aiReady ? '✅ READY' : '❌ NOT READY');
+  console.log('[LexiLens AI Init] ========================================');
 }
 
 // =============================================================================
-// Highlight System (Grammarly-style)
+// Status Bar System
 // =============================================================================
 
-function initializeHighlightSystem(): void {
-  // Create container for highlight overlays
-  if (!highlightContainer) {
-    highlightContainer = document.createElement('div');
-    highlightContainer.id = 'lexilens-highlight-container';
-    highlightContainer.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(highlightContainer);
+function initializeStatusBarSystem(): void {
+  if (!statusBar) {
+    statusBar = document.createElement('div');
+    statusBar.id = 'lexilens-status-bar';
+    statusBar.className = 'hidden';
+    statusBar.innerHTML = `
+      <div class="lexilens-status-icon">✍️</div>
+      <div class="lexilens-status-content">
+        <div class="lexilens-status-title">LexiLens</div>
+        <div class="lexilens-status-counts"></div>
+      </div>
+    `;
+    statusBar.addEventListener('click', openReviewModal);
+    document.body.appendChild(statusBar);
   }
 
-  // Create suggestion popup
-  if (!suggestionPopup) {
-    suggestionPopup = document.createElement('div');
-    suggestionPopup.id = 'lexilens-suggestion-popup';
-    suggestionPopup.setAttribute('role', 'tooltip');
-    document.body.appendChild(suggestionPopup);
+  if (!reviewModal) {
+    reviewModal = document.createElement('div');
+    reviewModal.id = 'lexilens-review-modal';
+    reviewModal.innerHTML = `
+      <div class="lexilens-modal-content">
+        <div class="lexilens-modal-header">
+          <div class="lexilens-modal-title">
+            <span>📝</span>
+            <span>Review Suggestions</span>
+          </div>
+          <button class="lexilens-modal-close">✕</button>
+        </div>
+        <div class="lexilens-modal-body"></div>
+        <div class="lexilens-modal-footer">
+          <div class="lexilens-modal-progress"></div>
+          <div class="lexilens-modal-nav">
+            <button class="lexilens-nav-btn" data-action="prev">← Previous</button>
+            <button class="lexilens-nav-btn" data-action="next">Next →</button>
+            <button class="lexilens-nav-btn" data-action="done">Done</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(reviewModal);
 
-    // Track popup hover state
-    suggestionPopup.addEventListener('mouseenter', () => {
-      isPopupHovered = true;
-      cancelHideTimeout();
+    reviewModal.querySelector('.lexilens-modal-close')?.addEventListener('click', closeReviewModal);
+    reviewModal.addEventListener('click', (e) => {
+      if (e.target === reviewModal) closeReviewModal();
     });
 
-    suggestionPopup.addEventListener('mouseleave', () => {
-      isPopupHovered = false;
-      scheduleHidePopup();
-    });
+    reviewModal.querySelector('[data-action="prev"]')?.addEventListener('click', () => navigateSentence(-1));
+    reviewModal.querySelector('[data-action="next"]')?.addEventListener('click', () => navigateSentence(1));
+    reviewModal.querySelector('[data-action="done"]')?.addEventListener('click', closeReviewModal);
   }
 
-  // Listen for focus on editable elements
   document.addEventListener('focusin', handleFocusIn, true);
   document.addEventListener('focusout', handleFocusOut, true);
   document.addEventListener('input', handleInput, true);
-  document.addEventListener('scroll', updateHighlightPositions, true);
-  window.addEventListener('resize', updateHighlightPositions);
 
-  // Close popup when clicking outside
-  document.addEventListener('click', handleDocumentClick, true);
-
-  console.log('[LexiLens] Highlight system initialized');
+  console.log('[LexiLens] Status bar system initialized');
 }
 
-function destroyHighlightSystem(): void {
+function destroyStatusBarSystem(): void {
   document.removeEventListener('focusin', handleFocusIn, true);
   document.removeEventListener('focusout', handleFocusOut, true);
   document.removeEventListener('input', handleInput, true);
-  document.removeEventListener('scroll', updateHighlightPositions, true);
-  document.removeEventListener('click', handleDocumentClick, true);
-  window.removeEventListener('resize', updateHighlightPositions);
 
-  clearAllHighlights();
-
-  if (highlightContainer) {
-    highlightContainer.remove();
-    highlightContainer = null;
+  if (statusBar) {
+    statusBar.remove();
+    statusBar = null;
   }
 
-  if (suggestionPopup) {
-    suggestionPopup.remove();
-    suggestionPopup = null;
+  if (reviewModal) {
+    reviewModal.remove();
+    reviewModal = null;
   }
 
-  currentFocusedElement = null;
-  debouncedAnalyze.cancel();
-
-  console.log('[LexiLens] Highlight system destroyed');
+  console.log('[LexiLens] Status bar system destroyed');
 }
 
 // =============================================================================
-// Focus & Input Handling
+// Event Handlers
 // =============================================================================
 
 function handleFocusIn(event: FocusEvent): void {
@@ -196,9 +260,8 @@ function handleFocusIn(event: FocusEvent): void {
 
   if (isEditableElement(target)) {
     currentFocusedElement = target;
-    console.log('[LexiLens] Focused on editable:', target.tagName);
+    console.log('[LexiLens] Focused:', target.tagName);
 
-    // Analyze existing content
     const text = getElementText(target);
     if (text.length > 2) {
       debouncedAnalyze(text, target);
@@ -207,47 +270,14 @@ function handleFocusIn(event: FocusEvent): void {
 }
 
 function handleFocusOut(event: FocusEvent): void {
-  const target = event.target as HTMLElement;
-  const relatedTarget = event.relatedTarget as HTMLElement | null;
-
-  // Don't clear if clicking on popup or highlight
-  if (relatedTarget) {
-    if (
-      suggestionPopup?.contains(relatedTarget) ||
-      highlightContainer?.contains(relatedTarget)
-    ) {
-      return;
-    }
-  }
-
-  // Longer delay to allow interactions
   setTimeout(() => {
-    // Only clear if we're not hovering popup/highlight and focus hasn't returned
-    if (!isPopupHovered && !isHighlightHovered) {
-      if (target === currentFocusedElement) {
-        // Check if we've focused back on the same element
-        if (document.activeElement !== currentFocusedElement) {
-          clearAllHighlights();
-          hideSuggestionPopup();
-          currentFocusedElement = null;
-          debouncedAnalyze.cancel();
-        }
-      }
+    if (document.activeElement !== currentFocusedElement) {
+      hideStatusBar();
+      currentFocusedElement = null;
+      lastAnalyzedText = '';
+      debouncedAnalyze.cancel();
     }
   }, 300);
-}
-
-function handleDocumentClick(event: MouseEvent): void {
-  const target = event.target as HTMLElement;
-
-  // If clicking outside popup and highlights, hide popup
-  if (
-    suggestionPopup &&
-    !suggestionPopup.contains(target) &&
-    !highlightContainer?.contains(target)
-  ) {
-    hideSuggestionPopup();
-  }
 }
 
 function handleInput(event: Event): void {
@@ -257,38 +287,13 @@ function handleInput(event: Event): void {
 
   if (isEditableElement(target)) {
     const text = getElementText(target);
-
-    // Hide popup while typing
-    hideSuggestionPopup();
-
     if (text.length > 2) {
       debouncedAnalyze(text, target);
     } else {
-      clearAllHighlights();
+      hideStatusBar();
+      lastAnalyzedText = '';
     }
   }
-}
-
-function isEditableElement(element: HTMLElement): boolean {
-  const tagName = element.tagName.toUpperCase();
-
-  if (tagName === 'INPUT') {
-    const inputType = (element as HTMLInputElement).type.toLowerCase();
-    return ['text', 'search', 'email', 'url', 'tel', ''].includes(inputType);
-  }
-
-  if (tagName === 'TEXTAREA') {
-    return true;
-  }
-
-  return element.isContentEditable;
-}
-
-function getElementText(element: HTMLElement): string {
-  if ('value' in element) {
-    return (element as HTMLInputElement | HTMLTextAreaElement).value;
-  }
-  return element.innerText || element.textContent || '';
 }
 
 // =============================================================================
@@ -303,778 +308,488 @@ const debouncedAnalyze = debounceWithCancel(
 );
 
 async function performAnalysis(text: string, element: HTMLElement): Promise<void> {
-  console.log('[LexiLens] Analyzing:', text.substring(0, 50));
+  if (text === lastAnalyzedText) return;
 
-  // Start with local dictionary (instant)
-  let suggestions = analyzeText(text);
+  const thisVersion = ++analysisVersion;
+  lastAnalyzedText = text;
 
-  // Show immediate results
+  console.log('\n[LexiLens] 📝 Analyzing:', text.substring(0, 60) + '...');
+
+  let suggestions: SpellingSuggestion[] = [];
+
+  // Try AI first
+  if (aiReady && aiEngineModule && settings) {
+    try {
+      suggestions = await aiEngineModule.analyzeWithAI(text, settings.ai);
+      console.log('[LexiLens] AI found', suggestions.length, 'issues');
+    } catch (error) {
+      console.error('[LexiLens] AI error:', error);
+    }
+  }
+
+  // Fallback to local
+  if (suggestions.length === 0) {
+    suggestions = analyzeTextLocal(text);
+    console.log('[LexiLens] Local found', suggestions.length, 'issues');
+  }
+
+  // Check for stale results
+  if (thisVersion !== analysisVersion) {
+    console.log('[LexiLens] Stale result, discarding');
+    return;
+  }
+
+  currentSuggestions = suggestions;
+
   if (suggestions.length > 0) {
-    currentSuggestions = suggestions;
-    renderHighlights(suggestions, element);
-  }
-
-  // If browser AI is ready and text needs context analysis
-  if (browserAIReady && browserAIModule && settings?.browserAI?.enabled) {
-    const shouldUseAI = browserAIModule.shouldUseBrowserAI(text);
-
-    if (shouldUseAI) {
-      console.log('[LexiLens] Running browser AI analysis...');
-
-      try {
-        const aiSuggestions = await browserAIModule.analyzeWithBrowserAI(text, {
-          enabled: true,
-          modelId: settings.browserAI.modelId,
-          customTerms: settings.browserAI.customTerms || [],
-        });
-
-        if (aiSuggestions.length > 0) {
-          // Merge AI suggestions with local ones
-          const merged = mergeSuggestions(suggestions, aiSuggestions);
-          currentSuggestions = merged;
-          renderHighlights(merged, element);
-          console.log('[LexiLens] AI found additional issues:', aiSuggestions.length);
-        }
-      } catch (error) {
-        console.error('[LexiLens] AI analysis failed:', error);
-      }
-    }
-  }
-
-  if (currentSuggestions.length === 0) {
-    clearAllHighlights();
-  }
-}
-
-/**
- * Merge local and AI suggestions, avoiding duplicates
- */
-function mergeSuggestions(
-  local: SpellingSuggestion[],
-  ai: SpellingSuggestion[]
-): SpellingSuggestion[] {
-  const seen = new Map<string, SpellingSuggestion>();
-
-  for (const s of local) {
-    seen.set(s.original.toLowerCase(), s);
-  }
-
-  for (const s of ai) {
-    const key = s.original.toLowerCase();
-    if (!seen.has(key)) {
-      seen.set(key, s);
-    }
-  }
-
-  return Array.from(seen.values());
-}
-
-// =============================================================================
-// Highlight Rendering
-// =============================================================================
-
-function renderHighlights(suggestions: SpellingSuggestion[], element: HTMLElement): void {
-  clearAllHighlights();
-
-  if (!highlightContainer) return;
-
-  const isInput = element.tagName === 'INPUT' || element.tagName === 'TEXTAREA';
-
-  suggestions.forEach((suggestion, index) => {
-    const highlight = createHighlight(suggestion, element, index, isInput);
-    if (highlight) {
-      highlightContainer!.appendChild(highlight);
-      activeHighlights.set(`${suggestion.position.start}-${suggestion.position.end}`, highlight);
-    }
-  });
-}
-
-function createHighlight(
-  suggestion: SpellingSuggestion,
-  element: HTMLElement,
-  index: number,
-  isInput: boolean
-): HTMLDivElement | null {
-  const rect = getWordRect(suggestion, element, isInput);
-  if (!rect) return null;
-
-  const highlight = document.createElement('div');
-  highlight.className = 'lexilens-highlight';
-  highlight.dataset.index = String(index);
-  highlight.dataset.word = suggestion.original;
-
-  // Position the highlight to cover the ENTIRE word (not just underline)
-  // This makes hovering much easier - any part of the word triggers popup
-  highlight.style.left = `${rect.left + window.scrollX}px`;
-  highlight.style.top = `${rect.top + window.scrollY}px`;
-  highlight.style.width = `${rect.width}px`;
-  highlight.style.height = `${rect.height}px`;
-
-  // Color based on confidence
-  if (suggestion.confidence > 0.8) {
-    highlight.classList.add('high-confidence');
+    organizeIntoSentences(text, suggestions);
+    updateStatusBar(suggestions);
   } else {
-    highlight.classList.add('medium-confidence');
+    hideStatusBar();
   }
+}
 
-  // Show popup on HOVER - anywhere on the word!
-  highlight.addEventListener('mouseenter', () => {
-    isHighlightHovered = true;
-    cancelHideTimeout();
-    showSuggestionPopup(suggestion, rect, element);
-  });
+function organizeIntoSentences(text: string, suggestions: SpellingSuggestion[]): void {
+  // Split text into sentences
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
 
-  highlight.addEventListener('mouseleave', () => {
-    isHighlightHovered = false;
-    scheduleHidePopup();
-  });
+  console.log('[LexiLens] Split into', sentences.length, 'sentences');
 
-  // Also support click
-  highlight.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    showSuggestionPopup(suggestion, rect, element);
-  });
+  currentSentences = sentences.map(sentence => {
+    const sentenceStart = text.indexOf(sentence);
+    const sentenceEnd = sentenceStart + sentence.length;
 
-  return highlight;
+    // Find issues in this sentence
+    const issues = suggestions.filter(s =>
+      s.position.start >= sentenceStart && s.position.end <= sentenceEnd
+    );
+
+    return {
+      text: sentence.trim(),
+      issues
+    };
+  }).filter(s => s.issues.length > 0); // Only sentences with issues
+
+  console.log('[LexiLens] Found', currentSentences.length, 'sentences with issues');
 }
 
 // =============================================================================
-// Popup Timing Helpers
+// Status Bar
 // =============================================================================
 
-function cancelHideTimeout(): void {
-  if (hideTimeout) {
-    clearTimeout(hideTimeout);
-    hideTimeout = null;
-  }
-}
+function updateStatusBar(suggestions: SpellingSuggestion[]): void {
+  if (!statusBar || !currentFocusedElement) return;
 
-function scheduleHidePopup(): void {
-  cancelHideTimeout();
-  hideTimeout = setTimeout(() => {
-    if (!isPopupHovered && !isHighlightHovered) {
-      hideSuggestionPopup();
-    }
-  }, 300);
-}
-
-// =============================================================================
-// Word Position Calculation
-// =============================================================================
-
-function getWordRect(
-  suggestion: SpellingSuggestion,
-  element: HTMLElement,
-  isInput: boolean
-): DOMRect | null {
-  try {
-    if (isInput) {
-      return getInputWordRect(suggestion, element as HTMLInputElement | HTMLTextAreaElement);
-    } else {
-      return getContentEditableWordRect(suggestion, element);
-    }
-  } catch (e) {
-    console.error('[LexiLens] Failed to get word rect:', e);
-    return null;
-  }
-}
-
-function getInputWordRect(
-  suggestion: SpellingSuggestion,
-  element: HTMLInputElement | HTMLTextAreaElement
-): DOMRect | null {
-  const text = element.value;
-
-  // Verify the word exists at the expected position
-  const expectedWord = text.substring(suggestion.position.start, suggestion.position.end);
-  if (expectedWord.toLowerCase() !== suggestion.original.toLowerCase()) {
-    // Word moved - try to find it again
-    const newStart = text.toLowerCase().indexOf(suggestion.original.toLowerCase());
-    if (newStart === -1) return null;
-    suggestion.position.start = newStart;
-    suggestion.position.end = newStart + suggestion.original.length;
-  }
-
-  // Create a mirror div to measure text position
-  const mirror = document.createElement('div');
-  const computed = window.getComputedStyle(element);
-
-  const stylesToCopy = [
-    'font-family', 'font-size', 'font-weight', 'font-style',
-    'letter-spacing', 'word-spacing', 'text-transform',
-    'padding-left', 'padding-right', 'padding-top', 'padding-bottom',
-    'border-left-width', 'border-right-width', 'border-top-width', 'border-bottom-width',
-    'box-sizing', 'line-height', 'text-indent'
-  ];
-
-  mirror.style.position = 'absolute';
-  mirror.style.visibility = 'hidden';
-  mirror.style.whiteSpace = 'pre-wrap';
-  mirror.style.wordWrap = 'break-word';
-  mirror.style.overflow = 'hidden';
-
-  stylesToCopy.forEach(style => {
-    mirror.style.setProperty(style, computed.getPropertyValue(style));
-  });
-
-  const isInput = element.tagName === 'INPUT';
-
-  if (isInput) {
-    mirror.style.whiteSpace = 'pre';
-    mirror.style.width = 'auto';
-    mirror.style.height = 'auto';
-  } else {
-    // Textarea - match dimensions
-    mirror.style.width = `${element.clientWidth}px`;
-    mirror.style.height = 'auto';
-  }
-
-  document.body.appendChild(mirror);
-
-  const beforeText = text.substring(0, suggestion.position.start);
-  const wordText = text.substring(suggestion.position.start, suggestion.position.end);
-
-  // Use spans to measure positions
-  const beforeSpan = document.createElement('span');
-  beforeSpan.textContent = beforeText.replace(/ /g, '\u00a0'); // Preserve spaces
-
-  const wordSpan = document.createElement('span');
-  wordSpan.style.backgroundColor = 'red'; // Debug: helps verify positioning
-  wordSpan.textContent = wordText;
-
-  mirror.appendChild(beforeSpan);
-  mirror.appendChild(wordSpan);
-
-  const elementRect = element.getBoundingClientRect();
-  const wordRect = wordSpan.getBoundingClientRect();
-  const mirrorRect = mirror.getBoundingClientRect();
-
-  // Account for scroll position within the input/textarea
-  const scrollLeft = element.scrollLeft || 0;
-  const scrollTop = element.scrollTop || 0;
-
-  // Calculate position relative to the input element
-  const relativeLeft = wordRect.left - mirrorRect.left - scrollLeft;
-  const relativeTop = wordRect.top - mirrorRect.top - scrollTop;
-
-  const result = new DOMRect(
-    elementRect.left + relativeLeft,
-    elementRect.top + relativeTop,
-    wordRect.width,
-    wordRect.height
-  );
-
-  document.body.removeChild(mirror);
-
-  // Validate result is within element bounds
-  if (result.left < elementRect.left || result.right > elementRect.right + 10) {
-    // Word is scrolled out of view
-    return null;
-  }
-
-  return result;
-}
-
-function getContentEditableWordRect(
-  suggestion: SpellingSuggestion,
-  element: HTMLElement
-): DOMRect | null {
-  const textNode = findTextNode(element, suggestion.position.start);
-  if (!textNode) return null;
-
-  const range = document.createRange();
-  const localStart = suggestion.position.start - getTextNodeOffset(element, textNode);
-  const localEnd = Math.min(localStart + suggestion.original.length, textNode.length);
-
-  range.setStart(textNode, Math.max(0, localStart));
-  range.setEnd(textNode, localEnd);
-
-  return range.getBoundingClientRect();
-}
-
-function findTextNode(element: HTMLElement, targetOffset: number): Text | null {
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let currentOffset = 0;
-  let node: Text | null;
-
-  while ((node = walker.nextNode() as Text)) {
-    const nodeLength = node.textContent?.length || 0;
-    if (currentOffset + nodeLength > targetOffset) {
-      return node;
-    }
-    currentOffset += nodeLength;
-  }
-
-  return null;
-}
-
-function getTextNodeOffset(element: HTMLElement, targetNode: Text): number {
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let offset = 0;
-  let node: Text | null;
-
-  while ((node = walker.nextNode() as Text)) {
-    if (node === targetNode) return offset;
-    offset += node.textContent?.length || 0;
-  }
-
-  return offset;
-}
-
-function updateHighlightPositions(): void {
-  if (!currentFocusedElement || currentSuggestions.length === 0) return;
-  renderHighlights(currentSuggestions, currentFocusedElement);
-}
-
-function clearAllHighlights(): void {
-  activeHighlights.forEach(highlight => highlight.remove());
-  activeHighlights.clear();
-}
-
-// =============================================================================
-// Dyslexia-Friendly Messaging (Our Key Differentiator!)
-// =============================================================================
-
-interface DyslexiaMessage {
-  title: string;
-  explanation: string;
-}
-
-/**
- * Generate encouraging, educational messages that explain WHY a word was flagged
- * This is what makes us different from Grammarly - we don't just correct,
- * we help users understand common dyslexia patterns
- */
-function getDyslexiaFriendlyMessage(suggestion: SpellingSuggestion): DyslexiaMessage {
-  const original = suggestion.original.toLowerCase();
-  const suggested = suggestion.suggestions[0]?.toLowerCase() || '';
-
-  // Check for letter reversals (b/d, p/q)
-  if (hasLetterReversal(original, suggested)) {
-    return {
-      title: 'Letter Mix-up Spotted',
-      explanation: `Letters like <strong>b/d</strong> and <strong>p/q</strong> are easy to flip — your brain processes them similarly. This is super common!`
-    };
-  }
-
-  // Check for phonetic spelling (sounds right, spelled differently)
-  if (isPhoneticSpelling(original, suggested)) {
-    return {
-      title: 'Sounds Right, Looks Different',
-      explanation: `You spelled it how it <em>sounds</em> — that's actually logical! English spelling is just weird sometimes. 🤷`
-    };
-  }
-
-  // Check for double letter issues
-  if (hasDoubleLetterIssue(original, suggested)) {
-    return {
-      title: 'Double Letter Tricky Spot',
-      explanation: `Double letters are hard to hear when speaking, so they're easy to miss or add. You're not alone — this trips up everyone!`
-    };
-  }
-
-  // Check for homophones
-  if (isHomophone(original)) {
-    return {
-      title: 'Sound-Alike Words',
-      explanation: `These words sound identical but mean different things. Context is key here — even spell-checkers struggle with these!`
-    };
-  }
-
-  // Check for silent letters
-  if (hasSilentLetterIssue(original, suggested)) {
-    return {
-      title: 'Sneaky Silent Letter',
-      explanation: `This word has a <em>silent letter</em> that you can't hear when speaking. English borrowed this from other languages — blame the French! 🇫🇷`
-    };
-  }
-
-  // Check for common suffixes
-  if (hasSuffixConfusion(original, suggested)) {
-    return {
-      title: 'Tricky Ending',
-      explanation: `Word endings like <strong>-tion/-sion</strong>, <strong>-ible/-able</strong> sound similar but are spelled differently. Even great writers look these up!`
-    };
-  }
-
-  // Default encouraging message
-  return {
-    title: 'Quick Spelling Note',
-    explanation: `This is a common word that trips people up. Your brain knew what you meant — let's just adjust the spelling.`
-  };
-}
-
-/**
- * Check if the error involves letter reversals (b/d, p/q, m/w, n/u)
- */
-function hasLetterReversal(original: string, suggested: string): boolean {
-  const reversalPairs = [
-    ['b', 'd'], ['d', 'b'],
-    ['p', 'q'], ['q', 'p'],
-    ['m', 'w'], ['w', 'm'],
-    ['n', 'u'], ['u', 'n']
-  ];
-
-  for (const [a, b] of reversalPairs) {
-    if (original.includes(a) && suggested.includes(b)) {
-      const replaced = original.replace(new RegExp(a, 'g'), b);
-      if (replaced === suggested) return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Check if this is a phonetic spelling (wrote it how it sounds)
- */
-function isPhoneticSpelling(original: string, suggested: string): boolean {
-  const phoneticPatterns = [
-    // Common phonetic misspellings
-    ['frend', 'friend'],
-    ['sed', 'said'],
-    ['rite', 'right'],
-    ['nite', 'night'],
-    ['lite', 'light'],
-    ['thru', 'through'],
-    ['tho', 'though'],
-    ['enuf', 'enough'],
-    ['cuz', 'because'],
-    ['becuz', 'because'],
-    ['shud', 'should'],
-    ['cud', 'could'],
-    ['wud', 'would'],
-    ['peple', 'people'],
-    ['pepole', 'people'],
-  ];
-
-  return phoneticPatterns.some(([wrong, right]) =>
-    original === wrong && suggested === right
-  );
-}
-
-/**
- * Check for double letter issues
- */
-function hasDoubleLetterIssue(original: string, suggested: string): boolean {
-  // Check if the difference is a doubled/undoubled letter
-  const doubleLetterWords = [
-    'accommodate', 'occurrence', 'committee', 'millennium',
-    'necessary', 'occasionally', 'recommend', 'tomorrow',
-    'beginning', 'succeeded', 'misspell', 'embarrass'
-  ];
-
-  if (doubleLetterWords.includes(suggested)) {
-    return true;
-  }
-
-  // Simple check: length differs by 1 and one has repeated letters
-  if (Math.abs(original.length - suggested.length) === 1) {
-    const longer = original.length > suggested.length ? original : suggested;
-    return /(.)\1/.test(longer);
-  }
-
-  return false;
-}
-
-/**
- * Check if word is a common homophone
- */
-function isHomophone(word: string): boolean {
-  const homophones = [
-    'their', 'there', 'theyre', "they're",
-    'your', 'youre', "you're",
-    'its', "it's", 'its',
-    'to', 'too', 'two',
-    'hear', 'here',
-    'know', 'no',
-    'write', 'right', 'rite',
-    'where', 'wear', 'were',
-    'which', 'witch',
-    'weather', 'whether',
-    'peace', 'piece',
-    'wait', 'weight',
-    'brake', 'break',
-    'flour', 'flower'
-  ];
-  return homophones.includes(word.toLowerCase());
-}
-
-/**
- * Check for silent letter issues
- */
-function hasSilentLetterIssue(original: string, suggested: string): boolean {
-  const silentLetterWords: Record<string, string> = {
-    'nife': 'knife',
-    'nock': 'knock',
-    'nee': 'knee',
-    'nit': 'knit',
-    'rong': 'wrong',
-    'rist': 'wrist',
-    'rite': 'write',
-    'reck': 'wreck',
-    'sychology': 'psychology',
-    'neumonia': 'pneumonia',
-    'lam': 'lamb',
-    'dum': 'dumb',
-    'det': 'debt',
-    'dout': 'doubt',
-    'iland': 'island',
-    'lisen': 'listen',
-    'casle': 'castle',
-    'wistle': 'whistle',
+  // Count by category
+  const counts = {
+    purple: 0,
+    yellow: 0,
+    blue: 0,
+    orange: 0,
+    green: 0
   };
 
-  return silentLetterWords[original] === suggested;
-}
+  suggestions.forEach(s => {
+    const cat = s.category as keyof typeof counts;
+    if (counts[cat] !== undefined) counts[cat]++;
+  });
 
-/**
- * Check for suffix confusion
- */
-function hasSuffixConfusion(original: string, suggested: string): boolean {
-  const suffixPairs = [
-    [/tion$/, /sion$/],
-    [/able$/, /ible$/],
-    [/ance$/, /ence$/],
-    [/ant$/, /ent$/],
-    [/er$/, /or$/],
-    [/ful$/, /full$/],
-  ];
+  const countsHtml = Object.entries(counts)
+    .filter(([_, count]) => count > 0)
+    .map(([category, count]) => `
+      <span class="lexilens-status-badge ${category}">
+        ${count}
+      </span>
+    `).join('');
 
-  for (const [pattern1, pattern2] of suffixPairs) {
-    if ((pattern1.test(original) && pattern2.test(suggested)) ||
-        (pattern2.test(original) && pattern1.test(suggested))) {
-      return true;
-    }
+  const countsContainer = statusBar.querySelector('.lexilens-status-counts');
+  if (countsContainer) {
+    countsContainer.innerHTML = countsHtml;
   }
-  return false;
+
+  // Position near the focused element (top-right corner)
+  const rect = currentFocusedElement.getBoundingClientRect();
+  const padding = 8;
+
+  // Position at top-right of the input field
+  const left = rect.right - 200; // 200px width of status bar
+  const top = rect.top - 50; // 50px above the input
+
+  statusBar.style.left = `${Math.max(padding, left)}px`;
+  statusBar.style.top = `${Math.max(padding, top)}px`;
+
+  statusBar.classList.remove('hidden');
+}
+
+function hideStatusBar(): void {
+  if (statusBar) {
+    statusBar.classList.add('hidden');
+  }
 }
 
 // =============================================================================
-// Suggestion Popup
+// Review Modal
 // =============================================================================
 
-function showSuggestionPopup(
-  suggestion: SpellingSuggestion,
-  rect: DOMRect,
-  element: HTMLElement
-): void {
-  if (!suggestionPopup) return;
+function openReviewModal(): void {
+  if (!reviewModal || currentSentences.length === 0) return;
 
-  cancelHideTimeout();
+  currentSentenceIndex = 0;
+  pendingChanges = [];
+  acceptedCount = 0;
+  ignoredCount = 0;
 
-  const corrections = suggestion.suggestions;
+  // Store the element reference so we can apply changes later
+  targetElement = currentFocusedElement;
+  console.log('[LexiLens] Stored target element:', targetElement?.tagName);
 
-  // Get friendly message based on the type of error
-  const { title, explanation } = getDyslexiaFriendlyMessage(suggestion);
+  reviewModal.classList.add('visible');
+  renderCurrentSentence();
+}
 
-  suggestionPopup.innerHTML = `
-    <div class="lexilens-popup-header">
-      <span class="lexilens-popup-icon">💡</span>
-      <span class="lexilens-popup-title">${title}</span>
-    </div>
-    <div class="lexilens-popup-explanation">
-      ${explanation}
-    </div>
-    <div class="lexilens-popup-original">
-      You wrote: <span class="original-word">${suggestion.original}</span>
-    </div>
-    <div class="lexilens-popup-suggestions">
-      ${corrections.map((word, i) => `
-        <button class="lexilens-suggestion-btn ${i === 0 ? 'primary' : ''}" data-word="${word}">
-          <span class="suggestion-word">${word}</span>
-          ${i === 0 ? '<span class="suggestion-badge">Best match</span>' : ''}
-        </button>
-      `).join('')}
-    </div>
-    <div class="lexilens-popup-footer">
-      <button class="lexilens-dismiss-btn" data-action="dismiss">Ignore this time</button>
-      <button class="lexilens-learn-btn" data-action="learn">Add to my dictionary</button>
-    </div>
-    <div class="lexilens-popup-reassurance">
-      🧠 This is a common dyslexia pattern — you're doing great!
+function closeReviewModal(): void {
+  if (reviewModal) {
+    reviewModal.classList.remove('visible');
+  }
+
+  // Apply all pending changes
+  applyAllChanges();
+}
+
+function navigateSentence(direction: number): void {
+  currentSentenceIndex += direction;
+  currentSentenceIndex = Math.max(0, Math.min(currentSentences.length - 1, currentSentenceIndex));
+  renderCurrentSentence();
+}
+
+function renderCurrentSentence(): void {
+  if (!reviewModal) return;
+
+  const body = reviewModal.querySelector('.lexilens-modal-body');
+  const progress = reviewModal.querySelector('.lexilens-modal-progress');
+  const prevBtn = reviewModal.querySelector('[data-action="prev"]') as HTMLButtonElement;
+  const nextBtn = reviewModal.querySelector('[data-action="next"]') as HTMLButtonElement;
+
+  if (!body || !progress) return;
+
+  if (currentSentences.length === 0) {
+    body.innerHTML = `
+      <div class="lexilens-empty-state">
+        <div class="lexilens-empty-icon">✨</div>
+        <div class="lexilens-empty-title">All Clear!</div>
+        <div class="lexilens-empty-desc">No spelling issues found</div>
+      </div>
+    `;
+    return;
+  }
+
+  const sentence = currentSentences[currentSentenceIndex];
+
+  // Highlight error words in sentence
+  let highlightedText = sentence.text;
+  sentence.issues.forEach(issue => {
+    highlightedText = highlightedText.replace(
+      issue.original,
+      `<span class="error-word">${issue.original}</span>`
+    );
+  });
+
+  // Generate AI hint based on issues
+  const aiHint = generateAIHint(sentence.issues);
+
+  body.innerHTML = `
+    <div class="lexilens-sentence-container">
+      <div class="lexilens-sentence-label">Sentence ${currentSentenceIndex + 1} of ${currentSentences.length}</div>
+      <div class="lexilens-sentence-text">${highlightedText}</div>
+      ${aiHint ? `
+        <div class="lexilens-ai-hint">
+          <div class="lexilens-ai-hint-title">💡 AI Insight</div>
+          <div class="lexilens-ai-hint-text">${aiHint}</div>
+        </div>
+      ` : ''}
+      <div class="lexilens-issues-list">
+        ${sentence.issues.map((issue, idx) => `
+          <div class="lexilens-issue-item ${issue.category}">
+            <div class="lexilens-issue-header">
+              <div class="lexilens-issue-word">
+                <span class="lexilens-issue-original">${issue.original}</span>
+                <span class="lexilens-issue-arrow">→</span>
+                <span class="lexilens-issue-suggestion">${issue.suggestions[0]}</span>
+              </div>
+              <span class="lexilens-issue-category-badge ${issue.category}">${getCategoryName(issue.category)}</span>
+            </div>
+            ${issue.tip ? `<div class="lexilens-issue-tip">${issue.tip}</div>` : ''}
+            <div class="lexilens-issue-actions">
+              <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept</button>
+              <button class="lexilens-issue-btn ignore" data-index="${idx}">✕ Ignore</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
     </div>
   `;
 
-  // Position popup - ensure it stays within viewport
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
-
-  // First, make popup visible but off-screen to measure it
-  suggestionPopup.style.left = '-9999px';
-  suggestionPopup.style.top = '-9999px';
-  suggestionPopup.classList.add('visible');
-
-  const popupRect = suggestionPopup.getBoundingClientRect();
-  const popupWidth = popupRect.width || 300;
-  const popupHeight = popupRect.height || 250;
-
-  // Calculate ideal position (below the word)
-  let popupX = rect.left;
-  let popupY = rect.bottom + 8;
-
-  // Keep popup within horizontal bounds
-  if (popupX + popupWidth > viewportWidth - 10) {
-    popupX = viewportWidth - popupWidth - 10;
-  }
-  if (popupX < 10) {
-    popupX = 10;
-  }
-
-  // If popup would go below viewport, show it above the word instead
-  if (popupY + popupHeight > viewportHeight - 10) {
-    popupY = rect.top - popupHeight - 8;
-  }
-
-  // If still outside (word is at very top), just show at top
-  if (popupY < 10) {
-    popupY = 10;
-  }
-
-  suggestionPopup.style.left = `${popupX + window.scrollX}px`;
-  suggestionPopup.style.top = `${popupY + window.scrollY}px`;
-
-  // Handle clicks on suggestions
-  suggestionPopup.querySelectorAll('.lexilens-suggestion-btn').forEach(btn => {
+  // Attach event listeners
+  body.querySelectorAll('.lexilens-issue-btn.accept').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const word = (e.target as HTMLElement).closest('.lexilens-suggestion-btn')?.getAttribute('data-word');
-      if (word) {
-        // Remove highlight immediately
-        removeHighlightForSuggestion(suggestion);
-        applySuggestion(suggestion, word, element);
-      }
+      const target = e.target as HTMLElement;
+      const idx = parseInt(target.dataset.index || '0');
+      const original = target.dataset.original || '';
+      const replacement = target.dataset.replacement || '';
+      console.log('[LexiLens] Accept clicked:', { idx, original, replacement });
+      acceptSuggestion(sentence.issues[idx], original, replacement);
     });
   });
 
-  // Handle dismiss - remove highlight so it doesn't bother user again
-  suggestionPopup.querySelector('.lexilens-dismiss-btn')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    removeHighlightForSuggestion(suggestion);
-    hideSuggestionPopup();
+  body.querySelectorAll('.lexilens-issue-btn.ignore').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt((e.target as HTMLElement).dataset.index || '0');
+      ignoreSuggestion(sentence.issues[idx]);
+    });
   });
 
-  // Handle "Add to dictionary"
-  suggestionPopup.querySelector('.lexilens-learn-btn')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Add to custom terms in settings
-    addToCustomTerms(suggestion.original);
-    removeHighlightForSuggestion(suggestion);
-    hideSuggestionPopup();
-  });
+  // Update progress and navigation
+  const stats = acceptedCount > 0 || ignoredCount > 0
+    ? ` • ✓ ${acceptedCount} accepted • ✕ ${ignoredCount} ignored`
+    : '';
+  progress.textContent = `Sentence ${currentSentenceIndex + 1} of ${currentSentences.length}${stats}`;
+
+  if (prevBtn) prevBtn.disabled = currentSentenceIndex === 0;
+  if (nextBtn) nextBtn.disabled = currentSentenceIndex === currentSentences.length - 1;
 }
 
-/**
- * Remove highlight for a specific suggestion
- */
-function removeHighlightForSuggestion(suggestion: SpellingSuggestion): void {
-  const key = `${suggestion.position.start}-${suggestion.position.end}`;
-  const highlight = activeHighlights.get(key);
-  if (highlight) {
-    highlight.remove();
-    activeHighlights.delete(key);
+function getCategoryName(category: string): string {
+  const names: Record<string, string> = {
+    purple: 'Spelling',
+    yellow: 'Homophone',
+    blue: 'Name Check',
+    orange: 'Typo',
+    green: 'Suggestion'
+  };
+  return names[category] || 'Issue';
+}
+
+function generateAIHint(issues: SpellingSuggestion[]): string {
+  if (issues.length === 0) return '';
+
+  // Count by category
+  const counts = issues.reduce((acc, issue) => {
+    acc[issue.category] = (acc[issue.category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  // Generate contextual hints
+  const hints = [];
+
+  if (counts['purple']) {
+    hints.push(`Found ${counts['purple']} spelling ${counts['purple'] === 1 ? 'error' : 'errors'} - you're doing great at catching these!`);
   }
 
-  // Also remove from currentSuggestions so it doesn't reappear
-  currentSuggestions = currentSuggestions.filter(
-    s => s.position.start !== suggestion.position.start || s.position.end !== suggestion.position.end
-  );
+  if (counts['yellow']) {
+    hints.push(`${counts['yellow']} word${counts['yellow'] === 1 ? ' sounds' : 's sound'} like another - choose the right meaning.`);
+  }
+
+  if (counts['blue']) {
+    hints.push(`${counts['blue']} name${counts['blue'] === 1 ? '' : 's'} or acronym${counts['blue'] === 1 ? '' : 's'} to verify.`);
+  }
+
+  if (hints.length === 0) {
+    return "Great job! These are minor fixes that will make your writing even clearer.";
+  }
+
+  return hints.join(' ') + " 💪 You've got this!";
 }
 
-/**
- * Add word to custom terms (ignore list)
- */
-async function addToCustomTerms(word: string): Promise<void> {
-  if (!settings) return;
+function acceptSuggestion(issue: SpellingSuggestion, original: string, replacement: string): void {
+  console.log('[LexiLens] Queuing change:', { original, replacement });
 
-  const currentTerms = settings.browserAI?.customTerms || [];
-  if (!currentTerms.includes(word.toLowerCase())) {
-    const newTerms = [...currentTerms, word.toLowerCase()];
+  // Add to pending changes
+  pendingChanges.push({ original, replacement });
+  acceptedCount++;
 
-    // Update settings
-    const updatedAI = { ...settings.browserAI, customTerms: newTerms };
-    settings = { ...settings, browserAI: updatedAI };
+  // Remove from current sentence
+  const sentence = currentSentences[currentSentenceIndex];
+  sentence.issues = sentence.issues.filter(i => i !== issue);
 
-    // Persist to storage
-    try {
-      const { updateSettings } = await import('../../utils/storage');
-      await updateSettings({ browserAI: updatedAI });
-      console.log('[LexiLens] Added to dictionary:', word);
-    } catch (e) {
-      console.error('[LexiLens] Failed to save custom term:', e);
+  if (sentence.issues.length === 0) {
+    // Move to next sentence or close if done
+    currentSentences.splice(currentSentenceIndex, 1);
+    if (currentSentenceIndex >= currentSentences.length) {
+      currentSentenceIndex = Math.max(0, currentSentences.length - 1);
     }
   }
-}
 
-function hideSuggestionPopup(): void {
-  if (suggestionPopup) {
-    suggestionPopup.classList.remove('visible');
+  if (currentSentences.length === 0) {
+    console.log('[LexiLens] 🎉 All issues reviewed! Applying', pendingChanges.length, 'changes...');
+    closeReviewModal();
+    hideStatusBar();
+  } else {
+    renderCurrentSentence();
   }
 }
 
-function applySuggestion(
-  suggestion: SpellingSuggestion,
-  replacement: string,
-  element: HTMLElement
-): void {
-  const isInput = element.tagName === 'INPUT' || element.tagName === 'TEXTAREA';
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
+function ignoreSuggestion(issue: SpellingSuggestion): void {
+  console.log('[LexiLens] Ignoring:', issue.original);
+
+  ignoredCount++;
+
+  const sentence = currentSentences[currentSentenceIndex];
+  sentence.issues = sentence.issues.filter(i => i !== issue);
+
+  if (sentence.issues.length === 0) {
+    currentSentences.splice(currentSentenceIndex, 1);
+    if (currentSentenceIndex >= currentSentences.length) {
+      currentSentenceIndex = Math.max(0, currentSentences.length - 1);
+    }
+  }
+
+  if (currentSentences.length === 0) {
+    console.log('[LexiLens] All issues reviewed!');
+    closeReviewModal();
+    hideStatusBar();
+  } else {
+    renderCurrentSentence();
+  }
+}
+
+function applyAllChanges(): void {
+  if (pendingChanges.length === 0) {
+    console.log('[LexiLens] No changes to apply');
+    return;
+  }
+
+  // Use the stored target element instead of currentFocusedElement
+  const element = targetElement || currentFocusedElement;
+
+  if (!element) {
+    console.error('[LexiLens] ❌ No target element to apply changes to!');
+    console.error('[LexiLens] targetElement:', targetElement);
+    console.error('[LexiLens] currentFocusedElement:', currentFocusedElement);
+    return;
+  }
+
+  console.log('[LexiLens] 🔄 Applying', pendingChanges.length, 'changes to', element.tagName);
+  console.log('[LexiLens] Pending changes:', JSON.stringify(pendingChanges, null, 2));
+
+  const isInput = element.tagName === 'INPUT' || element.tagName === 'TEXTAREA';
+  let currentText = getElementText(element);
+
+  console.log('[LexiLens] Original text (', currentText.length, 'chars):', currentText);
+
+  // Apply all changes in sequence
+  let appliedCount = 0;
+  pendingChanges.forEach((change, index) => {
+    console.log(`[LexiLens] Processing change ${index + 1}:`, change);
+
+    // Try to find the word (case-insensitive, whole word)
+    const escapedOriginal = escapeRegex(change.original);
+    const regex = new RegExp(`\\b${escapedOriginal}\\b`, 'i');
+
+    console.log(`[LexiLens] Searching for regex: \\b${escapedOriginal}\\b`);
+    const match = regex.exec(currentText);
+
+    if (match) {
+      console.log(`[LexiLens] ✓ Found at position ${match.index}`);
+      const before = currentText.substring(0, match.index);
+      const after = currentText.substring(match.index + match[0].length);
+      currentText = before + change.replacement + after;
+      console.log(`[LexiLens] ✓ ${index + 1}. "${change.original}" → "${change.replacement}" APPLIED`);
+      appliedCount++;
+    } else {
+      // Try case-sensitive search without word boundaries as fallback
+      const simpleIndex = currentText.indexOf(change.original);
+      if (simpleIndex !== -1) {
+        console.log(`[LexiLens] ✓ Found with simple search at position ${simpleIndex}`);
+        const before = currentText.substring(0, simpleIndex);
+        const after = currentText.substring(simpleIndex + change.original.length);
+        currentText = before + change.replacement + after;
+        console.log(`[LexiLens] ✓ ${index + 1}. "${change.original}" → "${change.replacement}" APPLIED (fallback)`);
+        appliedCount++;
+      } else {
+        console.error(`[LexiLens] ❌ ${index + 1}. Could not find "${change.original}" in text`);
+        console.error(`[LexiLens] Text snapshot:`, currentText.substring(0, 200));
+      }
+    }
+  });
+
+  console.log('[LexiLens] Applied', appliedCount, 'out of', pendingChanges.length, 'changes');
+  console.log('[LexiLens] Final text (', currentText.length, 'chars):', currentText);
+
+  // Update the element
   if (isInput) {
     const input = element as HTMLInputElement | HTMLTextAreaElement;
-    const text = input.value;
-    const newText =
-      text.substring(0, suggestion.position.start) +
-      replacement +
-      text.substring(suggestion.position.end);
+    const oldValue = input.value;
+    input.value = currentText;
+    console.log('[LexiLens] Updated input value');
+    console.log('[LexiLens] Old:', oldValue);
+    console.log('[LexiLens] New:', input.value);
 
-    input.value = newText;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    // Verify it was actually updated
+    setTimeout(() => {
+      console.log('[LexiLens] Verification - Current value:', input.value);
+    }, 100);
 
-    const newCursorPos = suggestion.position.start + replacement.length;
-    input.setSelectionRange(newCursorPos, newCursorPos);
     input.focus();
   } else {
-    const text = element.innerText;
-    const newText =
-      text.substring(0, suggestion.position.start) +
-      replacement +
-      text.substring(suggestion.position.end);
-
-    element.innerText = newText;
-    element.dispatchEvent(new Event('input', { bubbles: true }));
+    const oldText = element.innerText;
+    element.innerText = currentText;
+    console.log('[LexiLens] Updated contentEditable');
+    console.log('[LexiLens] Old:', oldText);
+    console.log('[LexiLens] New:', element.innerText);
+    element.focus();
   }
 
-  hideSuggestionPopup();
+  // Trigger events
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
 
-  // Re-analyze after applying
+  console.log('[LexiLens] ✅ All', appliedCount, 'changes applied successfully!');
+
+  // Clear pending changes and target element
+  pendingChanges = [];
+  targetElement = null;
+
+  // Trigger re-analysis
+  lastAnalyzedText = '';
   setTimeout(() => {
-    const newText = getElementText(element);
-    if (newText.length > 2) {
-      performAnalysis(newText, element);
-    } else {
-      clearAllHighlights();
+    if (element) {
+      debouncedAnalyze(currentText, element);
     }
   }, 100);
 }
 
 // =============================================================================
-// Message Handling
+// Utilities
 // =============================================================================
 
-function handleBackgroundMessage(message: LexiLensMessage): void {
-  switch (message.type) {
-    case 'SETTINGS_UPDATED':
-      break;
+function isEditableElement(element: HTMLElement): boolean {
+  if (!element) return false;
 
-    case 'ANALYSIS_RESULT':
-      if (currentFocusedElement && message.payload.suggestions.length > 0) {
-        currentSuggestions = message.payload.suggestions;
-        renderHighlights(message.payload.suggestions, currentFocusedElement);
-      }
-      break;
+  if (element.tagName === 'INPUT') {
+    const type = (element as HTMLInputElement).type?.toLowerCase();
+    return ['text', 'search', 'email', 'url', 'tel', ''].includes(type);
+  }
+
+  if (element.tagName === 'TEXTAREA') return true;
+  if (element.isContentEditable) return true;
+
+  return false;
+}
+
+function getElementText(element: HTMLElement): string {
+  if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+    return (element as HTMLInputElement | HTMLTextAreaElement).value;
+  }
+  return element.innerText || element.textContent || '';
+}
+
+function handleBackgroundMessage(message: LexiLensMessage): void {
+  if (message.type === 'SETTINGS_UPDATED' && message.payload) {
+    settings = { ...settings, ...message.payload } as LexiLensSettings;
   }
 }
 

@@ -1,90 +1,103 @@
 import { useState, useEffect, useCallback } from 'react';
 import { loadSettings, updateSettings } from '../../utils/storage';
-import { broadcastSettingsUpdate } from '@/utils/messages.ts';
-import type { LexiLensSettings, BrowserAIConfig } from '../../types';
+import { broadcastSettingsUpdate } from '../../utils/messages';
+import {
+  checkWebGPUSupport,
+  checkOllamaAvailable,
+  BROWSER_MODELS,
+  OLLAMA_MODELS,
+  initBrowserAI,
+  isAIReady,
+} from '../../utils/ai-engine';
+import type { LexiLensSettings, AIConfig, AIBackend } from '../../types';
 import './App.css';
 
 function App() {
   const [settings, setSettings] = useState<LexiLensSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [webGPUSupported, setWebGPUSupported] = useState<boolean | null>(null);
+  const [ollamaAvailable, setOllamaAvailable] = useState<boolean | null>(null);
   const [customTermInput, setCustomTermInput] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<string>('');
+  const [aiReady, setAiReady] = useState(false);
 
-  // Load settings on mount
+  // Load settings and check capabilities
   useEffect(() => {
     loadSettings().then((s) => {
       setSettings(s);
       setLoading(false);
+      setAiReady(isAIReady(s.ai));
     });
 
-    // Check WebGPU support
-    checkWebGPU();
+    checkWebGPUSupport().then(setWebGPUSupported);
+    checkOllamaAvailable().then(setOllamaAvailable);
   }, []);
 
-  const checkWebGPU = async () => {
-    try {
-      if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
-        setWebGPUSupported(false);
-        return;
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const gpu = (navigator as any).gpu;
-      if (!gpu) {
-        setWebGPUSupported(false);
-        return;
-      }
-      const adapter = await gpu.requestAdapter();
-      setWebGPUSupported(adapter !== null);
-    } catch {
-      setWebGPUSupported(false);
-    }
-  };
-
-  // Update a setting and sync across tabs
+  // Update settings helper
   const handleSettingChange = useCallback(
     async <K extends keyof LexiLensSettings>(key: K, value: LexiLensSettings[K]) => {
       if (!settings) return;
-
       const updated = { ...settings, [key]: value };
       setSettings(updated);
-
       await updateSettings({ [key]: value });
       await broadcastSettingsUpdate({ [key]: value });
     },
     [settings]
   );
 
-  // Update browser AI config
-  const handleBrowserAIChange = useCallback(
-    async <K extends keyof BrowserAIConfig>(key: K, value: BrowserAIConfig[K]) => {
-      if (!settings?.browserAI) return;
-
-      const updatedAI: BrowserAIConfig = { ...settings.browserAI, [key]: value };
-      const updated = { ...settings, browserAI: updatedAI };
+  // Update AI config helper
+  const handleAIChange = useCallback(
+    async <K extends keyof AIConfig>(key: K, value: AIConfig[K]) => {
+      if (!settings) return;
+      const updatedAI = { ...settings.ai, [key]: value };
+      const updated = { ...settings, ai: updatedAI };
       setSettings(updated);
-
-      await updateSettings({ browserAI: updatedAI });
-      await broadcastSettingsUpdate({ browserAI: updatedAI });
+      await updateSettings({ ai: updatedAI });
+      await broadcastSettingsUpdate({ ai: updatedAI });
     },
     [settings]
   );
 
+  // Download browser model
+  const handleDownloadModel = async () => {
+    if (!settings) return;
+
+    setDownloadProgress(0);
+    setDownloadStatus('Starting download...');
+
+    const success = await initBrowserAI(
+      settings.ai.browserModelId,
+      (progress, status) => {
+        setDownloadProgress(progress);
+        setDownloadStatus(status);
+      }
+    );
+
+    if (success) {
+      setDownloadProgress(null);
+      setDownloadStatus('');
+      handleAIChange('modelDownloaded', true);
+      setAiReady(true);
+    } else {
+      setDownloadProgress(null);
+      setDownloadStatus('Download failed. Please try again.');
+    }
+  };
+
   // Add custom term
   const addCustomTerm = () => {
-    if (!customTermInput.trim() || !settings?.browserAI) return;
-
-    const currentTerms = settings.browserAI.customTerms ?? [];
-    const newTerms = [...currentTerms, customTermInput.trim()];
-    handleBrowserAIChange('customTerms', newTerms);
+    if (!customTermInput.trim() || !settings) return;
+    const newTerms = [...(settings.ai.customTerms || []), customTermInput.trim()];
+    handleAIChange('customTerms', newTerms);
     setCustomTermInput('');
   };
 
   // Remove custom term
   const removeCustomTerm = (term: string) => {
-    if (!settings?.browserAI) return;
-    const currentTerms = settings.browserAI.customTerms ?? [];
-    const newTerms = currentTerms.filter(t => t !== term);
-    handleBrowserAIChange('customTerms', newTerms);
+    if (!settings) return;
+    const newTerms = settings.ai.customTerms.filter(t => t !== term);
+    handleAIChange('customTerms', newTerms);
   };
 
   if (loading || !settings) {
@@ -95,7 +108,8 @@ function App() {
     );
   }
 
-  const customTerms = settings.browserAI?.customTerms ?? [];
+  const showBrowserOptions = settings.ai.backend === 'browser';
+  const showOllamaOptions = settings.ai.backend === 'ollama';
 
   return (
     <div className="popup-container">
@@ -105,35 +119,42 @@ function App() {
           <span className="logo">✨</span>
           LexiLens
         </h1>
-        <p className="tagline">Built for dyslexic minds</p>
+        <p className="tagline">AI-Powered Dyslexia Assistant</p>
       </header>
 
-      {/* What Makes Us Different */}
-      <section className="difference-banner">
-        <div className="difference-icon">🧠</div>
-        <div className="difference-text">
-          <strong>Not just another spell checker</strong>
-          <span>We understand how dyslexic brains work</span>
-        </div>
-      </section>
-
-      {/* Main Settings */}
+      {/* Main Toggle */}
       <main className="popup-main">
-        {/* Enable/Disable Section */}
         <section className="settings-section">
           <div className="setting-row">
             <div className="setting-info">
-              <label htmlFor="correction-toggle">Enable LexiLens</label>
+              <label>Enable LexiLens</label>
               <span className="setting-description">
-                Highlight dyslexia-specific spelling patterns
+                Highlight spelling errors as you type
               </span>
             </div>
             <label className="toggle">
               <input
-                id="correction-toggle"
                 type="checkbox"
                 checked={settings.correctionEnabled}
                 onChange={(e) => handleSettingChange('correctionEnabled', e.target.checked)}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          {/* Dyslexic Font Toggle */}
+          <div className="setting-row">
+            <div className="setting-info">
+              <label>📖 OpenDyslexic Font</label>
+              <span className="setting-description">
+                Apply dyslexia-friendly font to web pages
+              </span>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={settings.dyslexicFontEnabled || false}
+                onChange={(e) => handleSettingChange('dyslexicFontEnabled', e.target.checked)}
               />
               <span className="toggle-slider"></span>
             </label>
@@ -142,73 +163,190 @@ function App() {
 
         {settings.correctionEnabled && (
           <>
-            {/* Smart AI - Simplified single toggle */}
-            {webGPUSupported && (
-              <section className="settings-section ai-section">
-                <div className="setting-row">
-                  <div className="setting-info">
-                    <label>🚀 Enhanced Mode</label>
-                    <span className="setting-description">
-                      Smarter suggestions using on-device AI
-                    </span>
-                  </div>
-                  <label className="toggle">
-                    <input
-                      type="checkbox"
-                      checked={settings.browserAI?.enabled ?? false}
-                      onChange={(e) => handleBrowserAIChange('enabled', e.target.checked)}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
-                </div>
+            {/* AI Backend Selection */}
+            <section className="settings-section">
+              <h3 className="section-title">🤖 AI Engine</h3>
 
-                {settings.browserAI?.enabled && (
-                  <p className="ai-note">
-                    ✨ AI model will download once (~100MB), then runs 100% offline
-                  </p>
+              <div className="backend-options">
+                {/* Browser AI Option */}
+                <label className={`backend-option ${settings.ai.backend === 'browser' ? 'selected' : ''} ${!webGPUSupported ? 'disabled' : ''}`}>
+                  <input
+                    type="radio"
+                    name="backend"
+                    value="browser"
+                    checked={settings.ai.backend === 'browser'}
+                    onChange={() => handleAIChange('backend', 'browser')}
+                    disabled={!webGPUSupported}
+                  />
+                  <div className="backend-content">
+                    <div className="backend-header">
+                      <span className="backend-icon">🌐</span>
+                      <span className="backend-name">Browser AI</span>
+                      {!webGPUSupported && <span className="badge-warning">Not Supported</span>}
+                    </div>
+                    <p className="backend-desc">
+                      Runs in your browser. One-time download, then works offline.
+                    </p>
+                  </div>
+                </label>
+
+                {/* Ollama Option */}
+                <label className={`backend-option ${settings.ai.backend === 'ollama' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="backend"
+                    value="ollama"
+                    checked={settings.ai.backend === 'ollama'}
+                    onChange={() => handleAIChange('backend', 'ollama')}
+                  />
+                  <div className="backend-content">
+                    <div className="backend-header">
+                      <span className="backend-icon">🦙</span>
+                      <span className="backend-name">Ollama</span>
+                      {ollamaAvailable === true && <span className="badge-success">Running</span>}
+                      {ollamaAvailable === false && <span className="badge-warning">Not Found</span>}
+                    </div>
+                    <p className="backend-desc">
+                      Local AI server. More models, better accuracy.
+                      <a href="https://ollama.ai" target="_blank" rel="noopener"> Get Ollama →</a>
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </section>
+
+            {/* Browser Model Selection */}
+            {showBrowserOptions && webGPUSupported && (
+              <section className="settings-section">
+                <h3 className="section-title">📦 Select Model</h3>
+
+                <select
+                  className="model-select"
+                  value={settings.ai.browserModelId}
+                  onChange={(e) => {
+                    handleAIChange('browserModelId', e.target.value);
+                    handleAIChange('modelDownloaded', false);
+                    setAiReady(false);
+                  }}
+                >
+                  {BROWSER_MODELS.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} ({model.size}) - {model.description}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Download Button - show when not downloaded */}
+                {!settings.ai.modelDownloaded && downloadProgress === null && (
+                  <div className="download-section">
+                    <button className="download-btn" onClick={handleDownloadModel}>
+                      ⬇️ Download Model
+                    </button>
+                    <p className="download-note">
+                      Model will be cached in your browser. Only downloads once.
+                    </p>
+                  </div>
+                )}
+
+                {/* Download Progress */}
+                {downloadProgress !== null && (
+                  <div className="download-progress">
+                    <div className="progress-bar">
+                      <div
+                        className="progress-fill"
+                        style={{ width: `${downloadProgress * 100}%` }}
+                      />
+                    </div>
+                    <span className="progress-text">{downloadStatus}</span>
+                  </div>
+                )}
+
+                {/* Ready Status - show when downloaded */}
+                {settings.ai.modelDownloaded && (
+                  <div className="status-ready">
+                    <span className="status-icon">✅</span>
+                    <div className="status-text">
+                      <strong>Model ready!</strong>
+                      <span>Cached in browser - works offline</span>
+                    </div>
+                  </div>
                 )}
               </section>
             )}
 
-            {/* Custom Terms Section */}
+            {/* Ollama Model Selection */}
+            {showOllamaOptions && (
+              <section className="settings-section">
+                <h3 className="section-title">📦 Select Model</h3>
+
+                {ollamaAvailable ? (
+                  <>
+                    <select
+                      className="model-select"
+                      value={settings.ai.ollamaModelId}
+                      onChange={(e) => handleAIChange('ollamaModelId', e.target.value)}
+                    >
+                      {OLLAMA_MODELS.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name} - {model.description}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="hint">
+                      Run <code>ollama pull {settings.ai.ollamaModelId}</code> if not installed
+                    </p>
+                  </>
+                ) : (
+                  <div className="ollama-setup">
+                    <p>Ollama is not running. To use Ollama:</p>
+                    <ol>
+                      <li>Download from <a href="https://ollama.ai" target="_blank">ollama.ai</a></li>
+                      <li>Run <code>ollama serve</code></li>
+                      <li>Pull a model: <code>ollama pull llama3.2:1b</code></li>
+                    </ol>
+                    <button onClick={() => checkOllamaAvailable().then(setOllamaAvailable)}>
+                      🔄 Check Again
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Custom Terms */}
             <section className="settings-section">
-              <div className="setting-info" style={{ marginBottom: '10px' }}>
-                <label>📝 My Dictionary</label>
-                <span className="setting-description">
-                  Add words that shouldn't be flagged
-                </span>
-              </div>
+              <h3 className="section-title">📝 My Dictionary</h3>
+              <p className="setting-description">Words to ignore (names, jargon, etc.)</p>
 
               <div className="custom-terms-input">
                 <input
                   type="text"
-                  placeholder="e.g., Kubernetes, OAuth"
+                  placeholder="Add a word..."
                   value={customTermInput}
                   onChange={(e) => setCustomTermInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addCustomTerm()}
                 />
-                <button type="button" onClick={addCustomTerm}>Add</button>
+                <button onClick={addCustomTerm}>Add</button>
               </div>
 
-              {customTerms.length > 0 && (
+              {settings.ai.customTerms.length > 0 && (
                 <div className="custom-terms-list">
-                  {customTerms.map((term) => (
+                  {settings.ai.customTerms.map((term) => (
                     <span key={term} className="custom-term">
                       {term}
-                      <button type="button" onClick={() => removeCustomTerm(term)}>×</button>
+                      <button onClick={() => removeCustomTerm(term)}>×</button>
                     </span>
                   ))}
                 </div>
               )}
             </section>
 
-            {/* Privacy Section */}
+            {/* Privacy Note */}
             <section className="settings-section privacy-section">
               <div className="privacy-badge">
                 <span className="privacy-icon">🔒</span>
                 <div>
                   <strong>100% Private</strong>
-                  <span>Everything runs locally. Your text never leaves your device.</span>
+                  <span>All AI runs locally. Your text never leaves your device.</span>
                 </div>
               </div>
             </section>

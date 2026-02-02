@@ -1,90 +1,162 @@
 /**
  * LexiLens Content Script Styles
- * Grammarly-style inline highlighting for dyslexia issues
+ * Color-coded highlighting for different issue types
  *
- * KEY DIFFERENTIATOR: Encouraging, educational, dyslexia-friendly design
+ * Categories:
+ * - Purple: High-stakes definite errors (click for memory tip)
+ * - Yellow: Homophones/ambiguous (choose meaning)
+ * - Blue: Names, acronyms (verify)
+ * - Orange: Common typos (quick fix)
+ * - Green: Optional suggestions
+ *
+ * Note: OpenDyslexic font is injected dynamically via JavaScript
  */
+
+/* Apply OpenDyslexic to entire page when enabled */
+html.lexilens-dyslexic-font,
+html.lexilens-dyslexic-font body,
+html.lexilens-dyslexic-font * {
+  font-family: 'OpenDyslexic', -apple-system, sans-serif !important;
+}
 
 /* =============================================================================
    Highlight Container
    ============================================================================= */
 
 #lexilens-highlight-container {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
+  width: 0;
+  height: 0;
   pointer-events: none;
-  z-index: 2147483640;
+  z-index: 2147483646;
 }
 
 /* =============================================================================
-   Word Highlights - Full word coverage for easy hovering!
+   Word Highlights - Full word coverage for easy clicking
    ============================================================================= */
 
 .lexilens-highlight {
-  position: absolute;
+  position: fixed;
   border-radius: 3px;
   pointer-events: auto;
   cursor: pointer;
-  transition: all 0.15s ease;
-  /* Subtle background + bottom border = easy to see but not distracting */
-  border-bottom: 2px solid transparent;
-  background: transparent;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  border-bottom: 2.5px solid transparent;
+  box-sizing: border-box;
+  z-index: 2147483646;
 }
 
-/* High confidence - definite error (friendly orange) */
-.lexilens-highlight.high-confidence {
-  background: rgba(255, 149, 0, 0.15);
-  border-bottom-color: #FF9500;
+/* Purple - High-Stakes (Detective) */
+.lexilens-highlight.category-purple {
+  background: rgba(139, 92, 246, 0.15);
+  border-bottom-color: #8B5CF6;
+}
+.lexilens-highlight.category-purple:hover {
+  background: rgba(139, 92, 246, 0.25);
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
 }
 
-.lexilens-highlight.high-confidence:hover {
-  background: rgba(255, 149, 0, 0.25);
-  box-shadow: 0 2px 8px rgba(255, 149, 0, 0.3);
+/* Yellow - Ambiguous (Evil Twins) */
+.lexilens-highlight.category-yellow {
+  background: rgba(251, 191, 36, 0.15);
+  border-bottom-color: #FBBF24;
+}
+.lexilens-highlight.category-yellow:hover {
+  background: rgba(251, 191, 36, 0.25);
+  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);
 }
 
-/* Medium confidence - possible issue (soft yellow) */
-.lexilens-highlight.medium-confidence {
-  background: rgba(255, 214, 10, 0.15);
-  border-bottom-color: #FFD60A;
+/* Blue - Verify (Names/Acronyms) */
+.lexilens-highlight.category-blue {
+  background: rgba(59, 130, 246, 0.15);
+  border-bottom-color: #3B82F6;
+}
+.lexilens-highlight.category-blue:hover {
+  background: rgba(59, 130, 246, 0.25);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
-.lexilens-highlight.medium-confidence:hover {
-  background: rgba(255, 214, 10, 0.25);
-  box-shadow: 0 2px 8px rgba(255, 214, 10, 0.3);
+/* Orange - Common Typos */
+.lexilens-highlight.category-orange {
+  background: rgba(249, 115, 22, 0.15);
+  border-bottom-color: #F97316;
+}
+.lexilens-highlight.category-orange:hover {
+  background: rgba(249, 115, 22, 0.25);
+  box-shadow: 0 2px 8px rgba(249, 115, 22, 0.3);
+}
+
+/* Green - Suggestions */
+.lexilens-highlight.category-green {
+  background: rgba(34, 197, 94, 0.12);
+  border-bottom-color: #22C55E;
+  border-bottom-style: dashed;
+}
+.lexilens-highlight.category-green:hover {
+  background: rgba(34, 197, 94, 0.2);
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+}
+
+/* Fallback for unknown categories */
+.lexilens-highlight:not([class*="category-"]) {
+  background: rgba(156, 163, 175, 0.15);
+  border-bottom-color: #9CA3AF;
 }
 
 /* =============================================================================
-   Suggestion Popup - The Heart of Our UX
+   Suggestion Popup - Fixed to prevent flickering
    ============================================================================= */
 
 #lexilens-suggestion-popup {
-  position: absolute;
+  position: fixed;
   z-index: 2147483647;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 16px;
   box-shadow:
-    0 10px 40px rgba(102, 126, 234, 0.4),
-    0 2px 10px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    0 10px 40px rgba(0, 0, 0, 0.3),
+    0 2px 10px rgba(0, 0, 0, 0.15);
   padding: 0;
   min-width: 280px;
-  max-width: 340px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  max-width: 360px;
+  font-family: 'OpenDyslexic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   color: white;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-8px) scale(0.98);
-  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
-  pointer-events: none;
+  display: none;
+  overflow: hidden;
 }
 
 #lexilens-suggestion-popup.visible {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
+  display: block;
+  animation: lexilens-popup-in 0.2s ease forwards;
+}
+
+@keyframes lexilens-popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Category-specific popup colors */
+#lexilens-suggestion-popup.category-purple {
+  background: linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%);
+}
+#lexilens-suggestion-popup.category-yellow {
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+}
+#lexilens-suggestion-popup.category-blue {
+  background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
+}
+#lexilens-suggestion-popup.category-orange {
+  background: linear-gradient(135deg, #F97316 0%, #EA580C 100%);
+}
+#lexilens-suggestion-popup.category-green {
+  background: linear-gradient(135deg, #22C55E 0%, #16A34A 100%);
 }
 
 /* Popup Header */
@@ -106,38 +178,38 @@
   letter-spacing: -0.01em;
 }
 
-/* Explanation - Educational content that makes us unique! */
-.lexilens-popup-explanation {
-  padding: 0 18px 12px;
+.lexilens-popup-category-badge {
+  margin-left: auto;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Tip/Explanation */
+.lexilens-popup-tip {
+  padding: 10px 18px;
+  background: rgba(0, 0, 0, 0.15);
   font-size: 13px;
   line-height: 1.5;
-  opacity: 0.92;
   color: rgba(255, 255, 255, 0.95);
-}
-
-.lexilens-popup-explanation strong {
-  color: #FFD60A;
-  font-weight: 600;
-}
-
-.lexilens-popup-explanation em {
-  font-style: italic;
-  color: #A5D6FF;
 }
 
 /* Original Word Display */
 .lexilens-popup-original {
   padding: 10px 18px;
-  background: rgba(0, 0, 0, 0.15);
   font-size: 13px;
   color: rgba(255, 255, 255, 0.8);
 }
 
 .lexilens-popup-original .original-word {
-  color: #FF9AA2;
+  color: #FEE2E2;
   font-weight: 600;
   text-decoration: line-through;
-  text-decoration-color: rgba(255, 154, 162, 0.5);
+  text-decoration-color: rgba(254, 226, 226, 0.5);
 }
 
 /* Suggestions */
@@ -156,7 +228,7 @@
   padding: 12px 16px;
   border: none;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.15);
   color: white;
   font-size: 15px;
   font-weight: 500;
@@ -166,20 +238,19 @@
 }
 
 .lexilens-suggestion-btn:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.25);
   transform: translateX(4px);
 }
 
 .lexilens-suggestion-btn.primary {
-  background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
+  background: rgba(255, 255, 255, 0.25);
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .lexilens-suggestion-btn.primary:hover {
-  background: linear-gradient(135deg, #4ADE80 0%, #22C55E 100%);
+  background: rgba(255, 255, 255, 0.35);
   transform: translateX(4px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.5);
 }
 
 .suggestion-word {
@@ -211,8 +282,8 @@
   padding: 8px 12px;
   border: none;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -221,28 +292,8 @@
 
 .lexilens-dismiss-btn:hover,
 .lexilens-learn-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.95);
-}
-
-.lexilens-learn-btn {
-  color: #A5D6FF;
-}
-
-.lexilens-learn-btn:hover {
-  background: rgba(165, 214, 255, 0.15);
-  color: #A5D6FF;
-}
-
-/* Reassurance Message - The Emotional Differentiator */
-.lexilens-popup-reassurance {
-  padding: 12px 18px;
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 0 0 16px 16px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.75);
-  text-align: center;
-  font-style: italic;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
 }
 
 /* =============================================================================
@@ -259,29 +310,12 @@
 
 /* High contrast mode */
 @media (prefers-contrast: high) {
-  .lexilens-highlight.high-confidence {
-    background: #FF6600;
-  }
-
-  .lexilens-highlight.medium-confidence {
-    background: #FFCC00;
+  .lexilens-highlight {
+    border-bottom-width: 3px;
   }
 
   #lexilens-suggestion-popup {
     border: 2px solid white;
-  }
-}
-
-/* =============================================================================
-   Dark Mode Adjustments
-   ============================================================================= */
-
-@media (prefers-color-scheme: dark) {
-  #lexilens-suggestion-popup {
-    box-shadow:
-      0 10px 40px rgba(0, 0, 0, 0.5),
-      0 2px 10px rgba(0, 0, 0, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
 }
 

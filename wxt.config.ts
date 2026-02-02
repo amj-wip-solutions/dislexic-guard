@@ -8,6 +8,12 @@ export default defineConfig({
     description: 'Grammarly-style writing assistant for dyslexia. Highlights and fixes phonetic spelling mistakes as you type.',
     version: '1.0.0',
     permissions: ['storage', 'activeTab'],
+    web_accessible_resources: [
+      {
+        resources: ['fonts/*.otf'],
+        matches: ['<all_urls>'],
+      },
+    ],
   },
 });
 
