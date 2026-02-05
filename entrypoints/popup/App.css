@@ -539,6 +539,151 @@
 }
 
 /* =============================================================================
+   Dictionary Tabs (Words vs Entities)
+   ============================================================================= */
+
+.dictionary-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  background: #f3f4f6;
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.dictionary-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.dictionary-tab:hover {
+  background: rgba(124, 58, 237, 0.08);
+  color: #7c3aed;
+}
+
+.dictionary-tab.active {
+  background: white;
+  color: #1a1a1a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dictionary-tab.active .tab-count {
+  background: #7c3aed;
+  color: white;
+}
+
+.tab-count.verified {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.dictionary-tab.active .tab-count.verified {
+  background: #10b981;
+  color: white;
+}
+
+.tab-count.homophone {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.dictionary-tab.active .tab-count.homophone {
+  background: #f59e0b;
+  color: white;
+}
+
+.dictionary-content {
+  padding-top: 4px;
+}
+
+.empty-state {
+  font-size: 13px;
+  color: #9ca3af;
+  text-align: center;
+  padding: 16px 8px;
+  line-height: 1.6;
+}
+
+/* Verified Entity Styles */
+.custom-term.verified-entity {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #047857;
+}
+
+.verified-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  background: #10b981;
+  color: white;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: bold;
+  margin-right: 2px;
+}
+
+.custom-term.verified-entity button {
+  background: rgba(16, 185, 129, 0.2);
+  color: #047857;
+}
+
+.custom-term.verified-entity button:hover {
+  background: rgba(239, 68, 68, 0.6);
+  color: white;
+}
+
+/* Homophone Word Styles */
+.custom-term.homophone-word {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #92400e;
+}
+
+.homophone-badge {
+  font-size: 12px;
+  margin-right: 2px;
+}
+
+.custom-term.homophone-word button {
+  background: rgba(245, 158, 11, 0.2);
+  color: #92400e;
+}
+
+.custom-term.homophone-word button:hover {
+  background: rgba(239, 68, 68, 0.6);
+  color: white;
+}
+
+/* =============================================================================
    AI Backend Selection
    ============================================================================= */
 

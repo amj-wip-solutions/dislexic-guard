@@ -5,8 +5,8 @@
 
 import { debounceWithCancel } from '../../utils/debounce';
 import { analyzeText as analyzeTextLocal } from '../../utils/phonetic-engine';
-import { loadSettings, onSettingsChange } from '../../utils/storage';
-import { onContentMessage } from '../../utils/messages';
+import { loadSettings, onSettingsChange, updateSettings } from '../../utils/storage';
+import { onContentMessage, broadcastSettingsUpdate } from '../../utils/messages';
 import type { LexiLensSettings, SpellingSuggestion, LexiLensMessage } from '../../types';
 import './style.css';
 import './status-bar.css';
@@ -508,7 +508,12 @@ function renderCurrentSentence(): void {
         </div>
       ` : ''}
       <div class="lexilens-issues-list">
-        ${sentence.issues.map((issue, idx) => `
+        ${sentence.issues.map((issue, idx) => {
+          const confidencePercent = Math.round((issue.confidence || 0.9) * 100);
+          const confidenceClass = confidencePercent >= 85 ? 'high' : confidencePercent >= 70 ? 'medium' : 'low';
+          const showQuestion = issue.category === 'yellow' && issue.question && confidencePercent < 80;
+          
+          return `
           <div class="lexilens-issue-item ${issue.category}">
             <div class="lexilens-issue-header">
               <div class="lexilens-issue-word">
@@ -516,15 +521,34 @@ function renderCurrentSentence(): void {
                 <span class="lexilens-issue-arrow">→</span>
                 <span class="lexilens-issue-suggestion">${issue.suggestions[0]}</span>
               </div>
-              <span class="lexilens-issue-category-badge ${issue.category}">${getCategoryName(issue.category)}</span>
+              <div class="lexilens-issue-meta">
+                <span class="lexilens-issue-confidence ${confidenceClass}" title="AI Confidence: ${confidencePercent}%">
+                  ${confidencePercent}%
+                </span>
+                <span class="lexilens-issue-category-badge ${issue.category}">${getCategoryName(issue.category)}</span>
+              </div>
             </div>
+            ${showQuestion ? `
+              <div class="lexilens-issue-question">
+                <span class="question-icon">🤔</span>
+                <span class="question-text">${issue.question}</span>
+              </div>
+            ` : ''}
             ${issue.tip ? `<div class="lexilens-issue-tip">${issue.tip}</div>` : ''}
             <div class="lexilens-issue-actions">
-              <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept</button>
-              <button class="lexilens-issue-btn ignore" data-index="${idx}">✕ Ignore</button>
+              ${issue.category === 'blue' ? `
+                <button class="lexilens-issue-btn verify" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Verify & Add to Dictionary</button>
+                <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept Fix</button>
+              ` : issue.category === 'yellow' ? `
+                <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept "${issue.suggestions[0]}"</button>
+                <button class="lexilens-issue-btn confirm-correct" data-index="${idx}" data-original="${issue.original}">✓ "${issue.original}" is Correct</button>
+              ` : `
+                <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept</button>
+                <button class="lexilens-issue-btn ignore" data-index="${idx}">✕ Ignore</button>
+              `}
             </div>
           </div>
-        `).join('')}
+        `}).join('')}
       </div>
     </div>
   `;
@@ -537,7 +561,68 @@ function renderCurrentSentence(): void {
       const original = target.dataset.original || '';
       const replacement = target.dataset.replacement || '';
       console.log('[LexiLens] Accept clicked:', { idx, original, replacement });
-      acceptSuggestion(sentence.issues[idx], original, replacement);
+
+      // Add visual feedback - animate the issue item
+      const issueItem = target.closest('.lexilens-issue-item');
+      if (issueItem) {
+        issueItem.classList.add('accepted');
+        setTimeout(() => {
+          acceptSuggestion(sentence.issues[idx], original, replacement);
+        }, 300); // Wait for animation
+      } else {
+        acceptSuggestion(sentence.issues[idx], original, replacement);
+      }
+    });
+  });
+
+  // Handle Verify & Add to Dictionary button for entities (blue category)
+  body.querySelectorAll('.lexilens-issue-btn.verify').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const target = e.target as HTMLElement;
+      const idx = parseInt(target.dataset.index || '0');
+      const original = target.dataset.original || '';
+      const replacement = target.dataset.replacement || '';
+      console.log('[LexiLens] Verify & Add clicked:', { idx, original, replacement });
+
+      // Add to verified entities in storage
+      await addToVerifiedEntities(replacement);
+
+      // Add visual feedback - animate the issue item
+      const issueItem = target.closest('.lexilens-issue-item');
+      if (issueItem) {
+        issueItem.classList.add('verified');
+        setTimeout(() => {
+          acceptSuggestion(sentence.issues[idx], original, replacement);
+        }, 300); // Wait for animation
+      } else {
+        acceptSuggestion(sentence.issues[idx], original, replacement);
+      }
+    });
+  });
+
+  // Handle Confirm Correct button for homophones (yellow category)
+  // This adds the original word to validated homophones so it won't be flagged again
+  body.querySelectorAll('.lexilens-issue-btn.confirm-correct').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const target = e.target as HTMLElement;
+      const idx = parseInt(target.dataset.index || '0');
+      const original = target.dataset.original || '';
+      console.log('[LexiLens] Confirm Correct clicked:', { idx, original });
+
+      // Add to validated homophones in storage
+      await addToValidatedHomophones(original);
+
+      // Add visual feedback - animate the issue item
+      const issueItem = target.closest('.lexilens-issue-item');
+      if (issueItem) {
+        issueItem.classList.add('confirmed');
+        setTimeout(() => {
+          // Just dismiss the issue, don't change the text
+          dismissIssue(sentence.issues[idx]);
+        }, 300); // Wait for animation
+      } else {
+        dismissIssue(sentence.issues[idx]);
+      }
     });
   });
 
@@ -562,7 +647,7 @@ function getCategoryName(category: string): string {
   const names: Record<string, string> = {
     purple: 'Spelling',
     yellow: 'Homophone',
-    blue: 'Name Check',
+    blue: 'Verify Identity',
     orange: 'Typo',
     green: 'Suggestion'
   };
@@ -600,6 +685,96 @@ function generateAIHint(issues: SpellingSuggestion[]): string {
   return hints.join(' ') + " 💪 You've got this!";
 }
 
+/**
+ * Add a verified entity to the dictionary in storage
+ * This will persist across sessions and pages
+ */
+async function addToVerifiedEntities(entity: string): Promise<void> {
+  if (!settings || !entity.trim()) return;
+
+  const currentEntities = settings.ai.verifiedEntities || [];
+
+  // Check if already exists (case-insensitive)
+  if (currentEntities.some(e => e.toLowerCase() === entity.toLowerCase())) {
+    console.log('[LexiLens] Entity already in dictionary:', entity);
+    return;
+  }
+
+  const newEntities = [...currentEntities, entity.trim()];
+  const updatedAI = { ...settings.ai, verifiedEntities: newEntities };
+  const updatedSettings = { ...settings, ai: updatedAI };
+
+  // Update local state
+  settings = updatedSettings;
+
+  // Persist to storage
+  await updateSettings({ ai: updatedAI });
+
+  // Broadcast to other parts of the extension (popup, etc.)
+  await broadcastSettingsUpdate({ ai: updatedAI });
+
+  console.log('[LexiLens] ✅ Added to verified entities:', entity);
+  console.log('[LexiLens] Current verified entities:', newEntities);
+}
+
+/**
+ * Add a validated homophone to storage
+ * This prevents the word from being flagged as a homophone error in the future
+ */
+async function addToValidatedHomophones(word: string): Promise<void> {
+  if (!settings || !word.trim()) return;
+
+  const currentHomophones = settings.ai.validatedHomophones || [];
+
+  // Check if already exists (case-insensitive)
+  if (currentHomophones.some((h: string) => h.toLowerCase() === word.toLowerCase())) {
+    console.log('[LexiLens] Homophone already validated:', word);
+    return;
+  }
+
+  const newHomophones = [...currentHomophones, word.trim()];
+  const updatedAI = { ...settings.ai, validatedHomophones: newHomophones };
+
+  // Update local state
+  settings = { ...settings, ai: updatedAI };
+
+  // Persist to storage
+  await updateSettings({ ai: updatedAI });
+
+  // Broadcast to other parts of the extension (popup, etc.)
+  await broadcastSettingsUpdate({ ai: updatedAI });
+
+  console.log('[LexiLens] ✅ Added to validated homophones:', word);
+  console.log('[LexiLens] Current validated homophones:', newHomophones);
+}
+
+/**
+ * Dismiss an issue without making any text changes
+ * Used when user confirms the original word is correct
+ */
+function dismissIssue(issue: SpellingSuggestion): void {
+  console.log('[LexiLens] Dismissing issue (no change):', issue.original);
+
+  // Just remove from current sentence without changing text
+  const sentence = currentSentences[currentSentenceIndex];
+  sentence.issues = sentence.issues.filter(i => i !== issue);
+
+  if (sentence.issues.length === 0) {
+    currentSentences.splice(currentSentenceIndex, 1);
+    if (currentSentenceIndex >= currentSentences.length) {
+      currentSentenceIndex = Math.max(0, currentSentences.length - 1);
+    }
+  }
+
+  if (currentSentences.length === 0) {
+    console.log('[LexiLens] All issues reviewed!');
+    closeReviewModal();
+    hideStatusBar();
+  } else {
+    renderCurrentSentence();
+  }
+}
+
 function acceptSuggestion(issue: SpellingSuggestion, original: string, replacement: string): void {
   console.log('[LexiLens] Queuing change:', { original, replacement });
 
@@ -607,8 +782,11 @@ function acceptSuggestion(issue: SpellingSuggestion, original: string, replaceme
   pendingChanges.push({ original, replacement });
   acceptedCount++;
 
-  // Remove from current sentence
+  // Update the sentence text in the UI immediately to show the change
   const sentence = currentSentences[currentSentenceIndex];
+  sentence.text = sentence.text.replace(new RegExp(`\\b${escapeRegex(original)}\\b`, 'i'), replacement);
+
+  // Remove from current sentence
   sentence.issues = sentence.issues.filter(i => i !== issue);
 
   if (sentence.issues.length === 0) {

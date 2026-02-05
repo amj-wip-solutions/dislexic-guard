@@ -18,8 +18,12 @@ export interface AIConfig {
   ollamaModelId: string;
   /** Ollama server endpoint */
   ollamaEndpoint: string;
-  /** Custom terms to ignore */
+  /** Custom terms to ignore (general words) */
   customTerms: string[];
+  /** Verified entities (names, companies, acronyms) - won't be flagged */
+  verifiedEntities: string[];
+  /** Validated homophones - words user confirmed are correct in context */
+  validatedHomophones: string[];
   /** Whether model has been downloaded (for browser) */
   modelDownloaded: boolean;
 }
@@ -41,6 +45,8 @@ export const DEFAULT_AI_CONFIG: AIConfig = {
   ollamaModelId: 'llama3.2:1b',
   ollamaEndpoint: 'http://localhost:11434',
   customTerms: [],
+  verifiedEntities: [],
+  validatedHomophones: [],
   modelDownloaded: false,
 };
 
@@ -137,6 +143,12 @@ export interface SpellingSuggestion {
   category: IssueCategory;
   /** Optional tip or explanation */
   tip?: string;
+  /** Optional clarifying question for homophones (yellow category) */
+  question?: string;
+  /** Whether this is a named entity (name, company, acronym) requiring verification */
+  isEntity?: boolean;
+  /** Type of entity if isEntity is true */
+  entityType?: 'name' | 'company' | 'acronym' | 'other';
 }
 
 export interface AnalysisResult {

@@ -34,6 +34,8 @@ export interface AIConfig {
   ollamaModelId: string;
   ollamaEndpoint: string;
   customTerms: string[];
+  verifiedEntities: string[];
+  validatedHomophones: string[];
   modelDownloaded: boolean;
 }
 
@@ -43,6 +45,8 @@ export const DEFAULT_AI_CONFIG: AIConfig = {
   ollamaModelId: 'llama3.2:1b',
   ollamaEndpoint: 'http://localhost:11434',
   customTerms: [],
+  verifiedEntities: [],
+  validatedHomophones: [],
   modelDownloaded: false,
 };
 
@@ -190,11 +194,13 @@ export function unloadBrowserAI(): void {
 // Spell Check (works with both backends)
 // =============================================================================
 
-const SPELL_CHECK_PROMPT = `You are a spelling assistant specialized in helping dyslexic writers. Your job is to find EVERY spelling error in the text.
+const SPELL_CHECK_PROMPT = `You are a spelling assistant specialized in helping dyslexic writers. Your job is to find EVERY spelling error AND identify named entities that need verification.
 
 IMPORTANT: Analyze the FULL CONTEXT of each sentence to understand what the writer meant.
 
-DYSLEXIA-SPECIFIC ERRORS TO LOOK FOR:
+=== SECTION 1: SPELLING ERRORS ===
+Find these dyslexia-specific errors:
+
 1. PHONETIC ERRORS - words spelled how they SOUND:
    - yesturday → yesterday, becuase → because, definately → definitely
    - seperate → separate, probaly → probably, diffrent → different
@@ -218,27 +224,62 @@ DYSLEXIA-SPECIFIC ERRORS TO LOOK FOR:
    - their/there/they're, your/you're, its/it's
    - to/too/two, than/then, affect/effect, lose/loose
 
+=== SECTION 2: ENTITY VERIFICATION (Named Entity Recognition) ===
+Identify words that appear to be:
+
+1. PERSON NAMES - First names, last names, full names
+   - john → John, musk → Musk, elon musk → Elon Musk
+   - michael → Michael (if context suggests it's a name)
+
+2. COMPANY/ORGANIZATION NAMES - Companies, brands, organizations
+   - apple → Apple, google → Google, microsoft → Microsoft
+   - amazon → Amazon, tesla → Tesla, nike → Nike
+   - unesco → UNESCO, nasa → NASA
+
+3. ACRONYMS & ABBREVIATIONS - Technical terms, initialisms
+   - api → API, html → HTML, css → CSS
+   - ceo → CEO, usa → USA, uk → UK
+
+For entities, provide the correct CASING and explain why it's flagged.
+
+=== OUTPUT FORMAT ===
 CATEGORIES:
-🟣 "purple" = Definite spelling errors (most errors are this)
-🟡 "yellow" = Homophones where you need context to know which word they meant
-🔵 "blue" = Names/acronyms that look wrong but might be intentional
+🟣 "purple" = Definite spelling errors
+🟡 "yellow" = Homophones where context is needed
+🔵 "blue" = Named entities (Names, Companies, Acronyms) - ALWAYS include entity:true and entityType
 
-FOR EACH ERROR return:
-- word: the EXACT misspelled word as it appears in the text
-- fix: the correct spelling
+FOR EACH ISSUE return:
+- word: the EXACT word as it appears in the text
+- fix: the correct spelling/casing
 - cat: "purple", "yellow", or "blue"
-- tip: A friendly 1-sentence explanation with a memory trick if possible
+- conf: confidence 0.0-1.0
+- tip: A friendly 1-sentence explanation
+- entity: (ONLY for blue) true if this is a named entity
+- entityType: (ONLY for blue) "name", "company", or "acronym"
+- q: (ONLY for yellow/homophones when conf < 0.8) A clarifying question
 
-EXAMPLE OUTPUT:
+ENTITY EXAMPLES:
 [
-  {"word":"yesturday","fix":"yesterday","cat":"purple","tip":"Sound it out: YES-ter-day"},
-  {"word":"frend","fix":"friend","cat":"purple","tip":"I am your frIEnd - 'i' before 'e'"},
-  {"word":"their","fix":"there","cat":"yellow","tip":"THERE = location (HERE is in tHERE)"}
+  {"word":"apple","fix":"Apple","cat":"blue","conf":0.85,"tip":"This looks like the company name Apple Inc.","entity":true,"entityType":"company"},
+  {"word":"john","fix":"John","cat":"blue","conf":0.9,"tip":"This appears to be a person's name.","entity":true,"entityType":"name"},
+  {"word":"api","fix":"API","cat":"blue","conf":0.95,"tip":"API is an acronym (Application Programming Interface).","entity":true,"entityType":"acronym"}
 ]
 
-BE THOROUGH - find ALL errors, even small ones. Dyslexic writers often have many errors per paragraph.
-Return [] ONLY if the text has zero spelling errors.
+SPELLING EXAMPLES:
+[
+  {"word":"yesturday","fix":"yesterday","cat":"purple","conf":0.95,"tip":"Sound it out: YES-ter-day"},
+  {"word":"your","fix":"you're","cat":"yellow","conf":0.95,"tip":"YOU'RE = you are (contraction)"}
+]
+
+CONFIDENCE FOR ENTITIES:
+- 0.9-1.0: Obvious entity (context makes it clear it's a name/company)
+- 0.8-0.9: Likely entity (capitalization or context suggests it)
+- 0.6-0.8: Possible entity (could be a common word or a name)
+
+BE THOROUGH - find ALL errors AND entities.
+Return [] ONLY if the text has zero issues.
 Output ONLY the JSON array, no other text.`;
+
 
 export async function analyzeWithAI(
   text: string,
@@ -255,12 +296,27 @@ export async function analyzeWithAI(
   console.log('[LexiLens AI] Analyzing text length:', cleanText.length);
   console.log('[LexiLens AI] Full text:', cleanText);
 
-  const customTermsNote = config.customTerms.length > 0
-    ? `\nIgnore these words (they are correct): ${config.customTerms.join(', ')}`
+  // Combine custom terms and verified entities for the ignore list
+  const allIgnoredTerms = [
+    ...(config.customTerms || []),
+    ...(config.verifiedEntities || []),
+    ...(config.validatedHomophones || [])
+  ];
+
+  const customTermsNote = allIgnoredTerms.length > 0
+    ? `\nIgnore these words (they are verified correct): ${allIgnoredTerms.join(', ')}`
     : '';
 
-  const systemPrompt = SPELL_CHECK_PROMPT + customTermsNote;
-  const userPrompt = `Find ALL spelling errors in this text:\n\n${cleanText}`;
+  const verifiedEntitiesNote = (config.verifiedEntities || []).length > 0
+    ? `\nThese are verified entities (do NOT flag them): ${config.verifiedEntities.join(', ')}`
+    : '';
+
+  const validatedHomophonesNote = (config.validatedHomophones || []).length > 0
+    ? `\nThese homophones have been validated by the user (do NOT flag them): ${config.validatedHomophones.join(', ')}`
+    : '';
+
+  const systemPrompt = SPELL_CHECK_PROMPT + customTermsNote + verifiedEntitiesNote + validatedHomophonesNote;
+  const userPrompt = `Find ALL spelling errors and named entities in this text:\n\n${cleanText}`;
 
   let response: string;
 
@@ -351,13 +407,25 @@ function parseAIResponse(response: string, originalText: string): SpellingSugges
       const validCategories = ['purple', 'yellow', 'blue', 'orange', 'green'];
       const category = validCategories.includes(item.cat) ? item.cat : 'purple';
 
-      console.log(`[LexiLens AI] Processing: "${item.word}" → "${item.fix}" [${category}] tip: ${item.tip?.substring(0, 50)}`);
+      // Parse confidence - default based on category
+      let confidence = 0.9;
+      if (typeof item.conf === 'number') {
+        confidence = Math.max(0, Math.min(1, item.conf));
+      } else if (category === 'yellow') {
+        confidence = 0.6; // Lower default for homophones
+      }
+
+      console.log(`[LexiLens AI] Processing: "${item.word}" → "${item.fix}" [${category}] conf:${confidence} tip: ${item.tip?.substring(0, 50)}`);
 
       while ((match = regex.exec(originalText)) !== null) {
+        // Determine if this is an entity
+        const isEntity = item.entity === true || category === 'blue';
+        const entityType = item.entityType || (isEntity ? 'other' : undefined);
+
         suggestions.push({
           original: match[0],
           suggestions: [item.fix],
-          confidence: 0.9,
+          confidence: confidence,
           source: 'ai',
           position: {
             start: match.index,
@@ -366,6 +434,11 @@ function parseAIResponse(response: string, originalText: string): SpellingSugges
           category: category,
           // Use AI-provided tip
           tip: item.tip || `Suggested: "${item.fix}"`,
+          // Include clarifying question for homophones
+          question: item.q || undefined,
+          // Entity recognition fields
+          isEntity: isEntity,
+          entityType: isEntity ? entityType : undefined,
         });
       }
 

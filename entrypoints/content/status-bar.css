@@ -194,10 +194,10 @@
 
 .lexilens-issue-item {
   background: white;
-  padding: 14px;
-  border-radius: 10px;
-  border: 2px solid #e5e7eb;
-  border-left: 4px solid #e5e7eb;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  border-left: 3px solid #e5e7eb;
 }
 
 .lexilens-issue-item.purple {
@@ -223,6 +223,28 @@
 .lexilens-issue-item.green {
   border-left-color: #16a34a;
   background: linear-gradient(to right, #f0fdf4 0%, white 100%);
+}
+
+/* Acceptance animation */
+.lexilens-issue-item.accepted {
+  animation: acceptFade 0.3s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes acceptFade {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    background: linear-gradient(to right, #dcfce7 0%, white 100%);
+  }
+  50% {
+    transform: scale(0.98);
+    background: linear-gradient(to right, #86efac 0%, #dcfce7 100%);
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(0.95);
+  }
 }
 
 /* AI Hints Section */
@@ -254,35 +276,89 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.lexilens-issue-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Confidence indicator */
+.lexilens-issue-confidence {
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.lexilens-issue-confidence.high {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.lexilens-issue-confidence.medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.lexilens-issue-confidence.low {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Clarifying question for homophones */
+.lexilens-issue-question {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   margin-bottom: 8px;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, #fef9c3 0%, #fef3c7 100%);
+  border-radius: 6px;
+  border: 1px solid #fde68a;
+}
+
+.lexilens-issue-question .question-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.lexilens-issue-question .question-text {
+  font-size: 12px;
+  color: #78350f;
+  line-height: 1.3;
+  font-weight: 500;
 }
 
 .lexilens-issue-word {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .lexilens-issue-original {
-  font-size: 15px;
-  font-weight: 700;
-  color: #ef4444;
+  font-size: 13px;
+  font-weight: 600;
+  color: #dc2626;
 }
 
 .lexilens-issue-arrow {
   color: #9ca3af;
+  font-size: 12px;
 }
 
 .lexilens-issue-suggestion {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   color: #16a34a;
 }
 
 .lexilens-issue-category-badge {
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -319,10 +395,10 @@
 }
 
 .lexilens-issue-tip {
-  font-size: 13px;
+  font-size: 12px;
   color: #6b7280;
-  line-height: 1.5;
-  margin-bottom: 10px;
+  line-height: 1.4;
+  margin-bottom: 8px;
 }
 
 .lexilens-issue-actions {
@@ -347,6 +423,70 @@
 
 .lexilens-issue-btn.accept:hover {
   background: #15803d;
+}
+
+/* Verify & Add to Dictionary button for entities */
+.lexilens-issue-btn.verify {
+  background: #2563eb;
+  color: white;
+}
+
+.lexilens-issue-btn.verify:hover {
+  background: #1d4ed8;
+}
+
+/* Verified animation */
+.lexilens-issue-item.verified {
+  animation: verifyFade 0.3s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes verifyFade {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    background: linear-gradient(to right, #dbeafe 0%, white 100%);
+  }
+  50% {
+    transform: scale(0.98);
+    background: linear-gradient(to right, #60a5fa 0%, #dbeafe 100%);
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(0.95);
+  }
+}
+
+/* Confirm Correct button for homophones */
+.lexilens-issue-btn.confirm-correct {
+  background: #f59e0b;
+  color: white;
+}
+
+.lexilens-issue-btn.confirm-correct:hover {
+  background: #d97706;
+}
+
+/* Confirmed animation for homophones */
+.lexilens-issue-item.confirmed {
+  animation: confirmFade 0.3s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes confirmFade {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    background: linear-gradient(to right, #fef3c7 0%, white 100%);
+  }
+  50% {
+    transform: scale(0.98);
+    background: linear-gradient(to right, #fbbf24 0%, #fef3c7 100%);
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(0.95);
+  }
 }
 
 .lexilens-issue-btn.ignore {

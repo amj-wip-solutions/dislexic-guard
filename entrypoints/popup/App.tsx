@@ -18,9 +18,11 @@ function App() {
   const [webGPUSupported, setWebGPUSupported] = useState<boolean | null>(null);
   const [ollamaAvailable, setOllamaAvailable] = useState<boolean | null>(null);
   const [customTermInput, setCustomTermInput] = useState('');
+  const [verifiedEntityInput, setVerifiedEntityInput] = useState('');
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [downloadStatus, setDownloadStatus] = useState<string>('');
   const [aiReady, setAiReady] = useState(false);
+  const [activeDictionaryTab, setActiveDictionaryTab] = useState<'words' | 'entities' | 'homophones'>('words');
 
   // Load settings and check capabilities
   useEffect(() => {
@@ -98,6 +100,28 @@ function App() {
     if (!settings) return;
     const newTerms = settings.ai.customTerms.filter(t => t !== term);
     handleAIChange('customTerms', newTerms);
+  };
+
+  // Add verified entity
+  const addVerifiedEntity = () => {
+    if (!verifiedEntityInput.trim() || !settings) return;
+    const newEntities = [...(settings.ai.verifiedEntities || []), verifiedEntityInput.trim()];
+    handleAIChange('verifiedEntities', newEntities);
+    setVerifiedEntityInput('');
+  };
+
+  // Remove verified entity
+  const removeVerifiedEntity = (entity: string) => {
+    if (!settings) return;
+    const newEntities = (settings.ai.verifiedEntities || []).filter((e: string) => e !== entity);
+    handleAIChange('verifiedEntities', newEntities);
+  };
+
+  // Remove validated homophone
+  const removeValidatedHomophone = (word: string) => {
+    if (!settings) return;
+    const newHomophones = (settings.ai.validatedHomophones || []).filter((h: string) => h !== word);
+    handleAIChange('validatedHomophones', newHomophones);
   };
 
   if (loading || !settings) {
@@ -312,30 +336,136 @@ function App() {
               </section>
             )}
 
-            {/* Custom Terms */}
+            {/* Custom Terms & Verified Entities */}
             <section className="settings-section">
               <h3 className="section-title">📝 My Dictionary</h3>
-              <p className="setting-description">Words to ignore (names, jargon, etc.)</p>
 
-              <div className="custom-terms-input">
-                <input
-                  type="text"
-                  placeholder="Add a word..."
-                  value={customTermInput}
-                  onChange={(e) => setCustomTermInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addCustomTerm()}
-                />
-                <button onClick={addCustomTerm}>Add</button>
+              {/* Tabs */}
+              <div className="dictionary-tabs">
+                <button
+                  className={`dictionary-tab ${activeDictionaryTab === 'words' ? 'active' : ''}`}
+                  onClick={() => setActiveDictionaryTab('words')}
+                >
+                  📖 Ignored
+                  {(settings.ai.customTerms?.length || 0) > 0 && (
+                    <span className="tab-count">{settings.ai.customTerms.length}</span>
+                  )}
+                </button>
+                <button
+                  className={`dictionary-tab ${activeDictionaryTab === 'entities' ? 'active' : ''}`}
+                  onClick={() => setActiveDictionaryTab('entities')}
+                >
+                  ✅ Entities
+                  {(settings.ai.verifiedEntities?.length || 0) > 0 && (
+                    <span className="tab-count verified">{settings.ai.verifiedEntities.length}</span>
+                  )}
+                </button>
+                <button
+                  className={`dictionary-tab ${activeDictionaryTab === 'homophones' ? 'active' : ''}`}
+                  onClick={() => setActiveDictionaryTab('homophones')}
+                >
+                  🔤 Homophones
+                  {(settings.ai.validatedHomophones?.length || 0) > 0 && (
+                    <span className="tab-count homophone">{settings.ai.validatedHomophones.length}</span>
+                  )}
+                </button>
               </div>
 
-              {settings.ai.customTerms.length > 0 && (
-                <div className="custom-terms-list">
-                  {settings.ai.customTerms.map((term) => (
-                    <span key={term} className="custom-term">
-                      {term}
-                      <button onClick={() => removeCustomTerm(term)}>×</button>
-                    </span>
-                  ))}
+              {/* Ignored Words Tab */}
+              {activeDictionaryTab === 'words' && (
+                <div className="dictionary-content">
+                  <p className="setting-description">Words to ignore (jargon, slang, etc.)</p>
+
+                  <div className="custom-terms-input">
+                    <input
+                      type="text"
+                      placeholder="Add a word..."
+                      value={customTermInput}
+                      onChange={(e) => setCustomTermInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addCustomTerm()}
+                    />
+                    <button onClick={addCustomTerm}>Add</button>
+                  </div>
+
+                  {settings.ai.customTerms.length > 0 && (
+                    <div className="custom-terms-list">
+                      {settings.ai.customTerms.map((term) => (
+                        <span key={term} className="custom-term">
+                          {term}
+                          <button onClick={() => removeCustomTerm(term)}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {settings.ai.customTerms.length === 0 && (
+                    <p className="empty-state">No ignored words yet</p>
+                  )}
+                </div>
+              )}
+
+              {/* Verified Entities Tab */}
+              {activeDictionaryTab === 'entities' && (
+                <div className="dictionary-content">
+                  <p className="setting-description">
+                    Names, companies, and acronyms you've verified
+                  </p>
+
+                  <div className="custom-terms-input">
+                    <input
+                      type="text"
+                      placeholder="Add a name or company..."
+                      value={verifiedEntityInput}
+                      onChange={(e) => setVerifiedEntityInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addVerifiedEntity()}
+                    />
+                    <button onClick={addVerifiedEntity}>Add</button>
+                  </div>
+
+                  {(settings.ai.verifiedEntities?.length || 0) > 0 && (
+                    <div className="custom-terms-list">
+                      {settings.ai.verifiedEntities.map((entity) => (
+                        <span key={entity} className="custom-term verified-entity">
+                          <span className="verified-badge">✓</span>
+                          {entity}
+                          <button onClick={() => removeVerifiedEntity(entity)}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {(settings.ai.verifiedEntities?.length || 0) === 0 && (
+                    <p className="empty-state">
+                      No verified entities yet. When you verify a name or company in the review modal, it will appear here.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Validated Homophones Tab */}
+              {activeDictionaryTab === 'homophones' && (
+                <div className="dictionary-content">
+                  <p className="setting-description">
+                    Words you've confirmed are correct (their/there/they're, etc.)
+                  </p>
+
+                  {(settings.ai.validatedHomophones?.length || 0) > 0 && (
+                    <div className="custom-terms-list">
+                      {settings.ai.validatedHomophones.map((word: string) => (
+                        <span key={word} className="custom-term homophone-word">
+                          <span className="homophone-badge">🔤</span>
+                          {word}
+                          <button onClick={() => removeValidatedHomophone(word)}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {(settings.ai.validatedHomophones?.length || 0) === 0 && (
+                    <p className="empty-state">
+                      No validated homophones yet. When you confirm a word like "their" or "there" is correct in the review modal, it will appear here.
+                    </p>
+                  )}
                 </div>
               )}
             </section>
