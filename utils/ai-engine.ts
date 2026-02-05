@@ -220,9 +220,59 @@ Find these dyslexia-specific errors:
    - qwickly → quickly (qw vs qu), triky → tricky (missing c)
    - brote → brought, rite/wright → write
 
-6. HOMOPHONES (sound same, different meaning) - MUST check sentence context:
+6. HOMOPHONES (sound same, different meaning) - CRITICAL: DEEPLY ANALYZE CONTEXT
+   
+   YOU MUST USE CONTEXT TO DETERMINE THE MOST LIKELY WORD. DO NOT GUESS 50/50!
+   
+   Common homophones:
    - their/there/they're, your/you're, its/it's
    - to/too/two, than/then, affect/effect, lose/loose
+   
+   CONTEXT ANALYSIS RULES:
+   
+   A. THEIR vs THERE vs THEY'RE:
+      - "THEIR" = possession (their house, their car) → conf: 0.90-0.98
+      - "THERE" = location/existence (over there, there is) → conf: 0.90-0.98
+      - "THEY'RE" = they are (they're coming) → conf: 0.95-0.99
+      Examples:
+      ✓ "I went to there house" → "their" (possession) conf: 0.95
+      ✓ "Put it over their" → "there" (location) conf: 0.92
+      ✓ "Their going now" → "they're" (they are) conf: 0.98
+   
+   B. YOUR vs YOU'RE:
+      - "YOUR" = possession (your car, your idea) → conf: 0.90-0.98
+      - "YOU'RE" = you are (you're right, you're going) → conf: 0.95-0.99
+      Examples:
+      ✓ "Your the best" → "you're" (you are) conf: 0.98
+      ✓ "You're car is nice" → "your" (possession) conf: 0.96
+   
+   C. ITS vs IT'S:
+      - "ITS" = possession (its color, its size) → conf: 0.90-0.98
+      - "IT'S" = it is/it has (it's raining, it's been) → conf: 0.95-0.99
+      Examples:
+      ✓ "Its raining" → "it's" (it is) conf: 0.97
+      ✓ "Look at it's tail" → "its" (possession) conf: 0.94
+   
+   D. TO vs TOO vs TWO:
+      - "TO" = direction/infinitive (go to, to be) → conf: 0.90-0.98
+      - "TOO" = also/excessive (me too, too much) → conf: 0.92-0.98
+      - "TWO" = number 2 → conf: 0.95-0.99
+   
+   E. THAN vs THEN:
+      - "THAN" = comparison (better than, more than) → conf: 0.92-0.98
+      - "THEN" = time/sequence (and then, back then) → conf: 0.90-0.97
+   
+   F. AFFECT vs EFFECT:
+      - "AFFECT" = verb (will affect, affects me) → conf: 0.85-0.95
+      - "EFFECT" = noun (the effect, side effect) → conf: 0.85-0.95
+   
+   CONFIDENCE GUIDELINES FOR HOMOPHONES:
+   - 0.95-1.0: Context makes it CERTAIN (verb form, clear pattern)
+   - 0.85-0.95: Context strongly indicates (grammatical role clear)
+   - 0.70-0.85: Context suggests but not definitive (ask question)
+   - 0.50-0.70: Context ambiguous (definitely ask question)
+   
+   NEVER DEFAULT TO 0.5 CONFIDENCE! Always analyze the grammatical context.
 
 === SECTION 2: ENTITY VERIFICATION (Named Entity Recognition) ===
 Identify words that appear to be:
@@ -268,13 +318,33 @@ ENTITY EXAMPLES:
 SPELLING EXAMPLES:
 [
   {"word":"yesturday","fix":"yesterday","cat":"purple","conf":0.95,"tip":"Sound it out: YES-ter-day"},
-  {"word":"your","fix":"you're","cat":"yellow","conf":0.95,"tip":"YOU'RE = you are (contraction)"}
+  {"word":"freind","fix":"friend","cat":"purple","conf":0.98,"tip":"I before E, except after C"}
+]
+
+HOMOPHONE EXAMPLES - HIGH CONFIDENCE WHEN CONTEXT IS CLEAR:
+[
+  {"word":"there","fix":"their","cat":"yellow","conf":0.96,"tip":"THEIR = possession (their house)"},
+  {"word":"your","fix":"you're","cat":"yellow","conf":0.98,"tip":"YOU'RE = you are (contraction)"},
+  {"word":"its","fix":"it's","cat":"yellow","conf":0.97,"tip":"IT'S = it is/it has (contraction)"},
+  {"word":"to","fix":"too","cat":"yellow","conf":0.94,"tip":"TOO = also or excessive"},
+  {"word":"than","fix":"then","cat":"yellow","conf":0.93,"tip":"THEN = time sequence"}
+]
+
+ONLY use conf < 0.8 and include "q" (question) if the context is truly ambiguous:
+[
+  {"word":"there","fix":"their","cat":"yellow","conf":0.65,"tip":"Could be location or possession","q":"Did you mean: 📍 THERE (location) or 👥 THEIR (belongs to them)?"}
 ]
 
 CONFIDENCE FOR ENTITIES:
 - 0.9-1.0: Obvious entity (context makes it clear it's a name/company)
 - 0.8-0.9: Likely entity (capitalization or context suggests it)
 - 0.6-0.8: Possible entity (could be a common word or a name)
+
+REMEMBER FOR HOMOPHONES:
+- Analyze grammatical context (verb/noun, possession/contraction, etc.)
+- High confidence (0.85-0.99) when grammatical role is clear
+- Only flag with low confidence if context is genuinely ambiguous
+- NEVER default to 0.5 - always use context clues!
 
 BE THOROUGH - find ALL errors AND entities.
 Return [] ONLY if the text has zero issues.

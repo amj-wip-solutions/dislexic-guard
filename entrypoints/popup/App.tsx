@@ -23,6 +23,7 @@ function App() {
   const [downloadStatus, setDownloadStatus] = useState<string>('');
   const [aiReady, setAiReady] = useState(false);
   const [activeDictionaryTab, setActiveDictionaryTab] = useState<'words' | 'entities' | 'homophones'>('words');
+  const [importStatus, setImportStatus] = useState<string>('');
 
   // Load settings and check capabilities
   useEffect(() => {
@@ -122,6 +123,115 @@ function App() {
     if (!settings) return;
     const newHomophones = (settings.ai.validatedHomophones || []).filter((h: string) => h !== word);
     handleAIChange('validatedHomophones', newHomophones);
+  };
+
+  // Import CSV dictionary
+  const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !settings) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const lines = text.split('\n').filter(line => line.trim());
+
+        // Skip header if present
+        const startIndex = lines[0].toLowerCase().includes('word') ? 1 : 0;
+
+        const newWords: string[] = [];
+        const newEntities: string[] = [];
+        const newHomophones: string[] = [];
+
+        for (let i = startIndex; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          // Parse CSV line (simple comma split, handles basic cases)
+          const parts = line.split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
+          const word = parts[0];
+          const type = parts[1]?.toLowerCase();
+
+          if (!word) continue;
+
+          // Categorize based on type column (if present)
+          if (type === 'entity' || type === 'name' || type === 'company' || type === 'acronym') {
+            if (!newEntities.includes(word) && !(settings.ai.verifiedEntities || []).includes(word)) {
+              newEntities.push(word);
+            }
+          } else if (type === 'homophone') {
+            if (!newHomophones.includes(word) && !(settings.ai.validatedHomophones || []).includes(word)) {
+              newHomophones.push(word);
+            }
+          } else {
+            // Default to custom terms
+            if (!newWords.includes(word) && !settings.ai.customTerms.includes(word)) {
+              newWords.push(word);
+            }
+          }
+        }
+
+        // Update all dictionaries at once
+        const updatedAI = {
+          ...settings.ai,
+          customTerms: [...settings.ai.customTerms, ...newWords],
+          verifiedEntities: [...(settings.ai.verifiedEntities || []), ...newEntities],
+          validatedHomophones: [...(settings.ai.validatedHomophones || []), ...newHomophones],
+        };
+
+        setSettings({ ...settings, ai: updatedAI });
+        updateSettings({ ai: updatedAI });
+        broadcastSettingsUpdate({ ai: updatedAI });
+
+        setImportStatus(`✅ Imported ${newWords.length + newEntities.length + newHomophones.length} words successfully!`);
+        setTimeout(() => setImportStatus(''), 3000);
+
+        // Reset file input
+        event.target.value = '';
+      } catch (error) {
+        console.error('CSV import error:', error);
+        setImportStatus('❌ Error importing CSV. Please check the file format.');
+        setTimeout(() => setImportStatus(''), 3000);
+      }
+    };
+
+    reader.readAsText(file);
+  };
+
+  // Export dictionary as CSV
+  const handleExportCSV = () => {
+    if (!settings) return;
+
+    const rows: string[] = ['word,type'];
+
+    // Add custom terms
+    settings.ai.customTerms.forEach(word => {
+      rows.push(`"${word}",word`);
+    });
+
+    // Add entities
+    (settings.ai.verifiedEntities || []).forEach(word => {
+      rows.push(`"${word}",entity`);
+    });
+
+    // Add homophones
+    (settings.ai.validatedHomophones || []).forEach(word => {
+      rows.push(`"${word}",homophone`);
+    });
+
+    const csv = rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lexilens-dictionary-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setImportStatus('✅ Dictionary exported!');
+    setTimeout(() => setImportStatus(''), 3000);
   };
 
   if (loading || !settings) {
@@ -340,6 +450,32 @@ function App() {
             <section className="settings-section">
               <h3 className="section-title">📝 My Dictionary</h3>
 
+              {/* Import/Export Section */}
+              <div className="dictionary-actions">
+                <div className="import-export-buttons">
+                  <label className="import-btn">
+                    📥 Import CSV
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleImportCSV}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                  <button className="export-btn" onClick={handleExportCSV}>
+                    📤 Export CSV
+                  </button>
+                </div>
+                {importStatus && (
+                  <div className="import-status">{importStatus}</div>
+                )}
+                <p className="setting-description csv-hint">
+                  Import a personal or company dictionary. CSV format: <code>word,type</code>
+                  <br />
+                  Types: <code>word</code>, <code>entity</code>, <code>homophone</code>
+                </p>
+              </div>
+
               {/* Tabs */}
               <div className="dictionary-tabs">
                 <button
@@ -437,33 +573,6 @@ function App() {
                   {(settings.ai.verifiedEntities?.length || 0) === 0 && (
                     <p className="empty-state">
                       No verified entities yet. When you verify a name or company in the review modal, it will appear here.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Validated Homophones Tab */}
-              {activeDictionaryTab === 'homophones' && (
-                <div className="dictionary-content">
-                  <p className="setting-description">
-                    Words you've confirmed are correct (their/there/they're, etc.)
-                  </p>
-
-                  {(settings.ai.validatedHomophones?.length || 0) > 0 && (
-                    <div className="custom-terms-list">
-                      {settings.ai.validatedHomophones.map((word: string) => (
-                        <span key={word} className="custom-term homophone-word">
-                          <span className="homophone-badge">🔤</span>
-                          {word}
-                          <button onClick={() => removeValidatedHomophone(word)}>×</button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {(settings.ai.validatedHomophones?.length || 0) === 0 && (
-                    <p className="empty-state">
-                      No validated homophones yet. When you confirm a word like "their" or "there" is correct in the review modal, it will appear here.
                     </p>
                   )}
                 </div>

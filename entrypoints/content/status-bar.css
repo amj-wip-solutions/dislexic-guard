@@ -467,6 +467,30 @@
   background: #d97706;
 }
 
+/* Secondary variant (less prominent for high-confidence suggestions) */
+.lexilens-issue-btn.confirm-correct.secondary {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+}
+
+.lexilens-issue-btn.confirm-correct.secondary:hover {
+  background: #fde68a;
+}
+
+/* Primary variant (more prominent for high-confidence suggestions) */
+.lexilens-issue-btn.accept.primary {
+  background: #16a34a;
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(22, 163, 74, 0.3);
+}
+
+.lexilens-issue-btn.accept.primary:hover {
+  background: #15803d;
+  box-shadow: 0 4px 6px rgba(22, 163, 74, 0.4);
+}
+
 /* Confirmed animation for homophones */
 .lexilens-issue-item.confirmed {
   animation: confirmFade 0.3s ease forwards;

@@ -540,8 +540,13 @@ function renderCurrentSentence(): void {
                 <button class="lexilens-issue-btn verify" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Verify & Add to Dictionary</button>
                 <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept Fix</button>
               ` : issue.category === 'yellow' ? `
-                <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept "${issue.suggestions[0]}"</button>
-                <button class="lexilens-issue-btn confirm-correct" data-index="${idx}" data-original="${issue.original}">✓ "${issue.original}" is Correct</button>
+                ${confidencePercent >= 85 ? `
+                  <button class="lexilens-issue-btn accept primary" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Use "${issue.suggestions[0]}" (${confidencePercent}% confident)</button>
+                  <button class="lexilens-issue-btn confirm-correct secondary" data-index="${idx}" data-original="${issue.original}">Keep "${issue.original}"</button>
+                ` : `
+                  <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Use "${issue.suggestions[0]}"</button>
+                  <button class="lexilens-issue-btn confirm-correct" data-index="${idx}" data-original="${issue.original}">✓ Keep "${issue.original}"</button>
+                `}
               ` : `
                 <button class="lexilens-issue-btn accept" data-index="${idx}" data-original="${issue.original}" data-replacement="${issue.suggestions[0]}">✓ Accept</button>
                 <button class="lexilens-issue-btn ignore" data-index="${idx}">✕ Ignore</button>
